@@ -25,7 +25,13 @@ final class SlackFakes {
     }
 
     /** Records every Slack call instead of making it. */
-    static final class FakeMessenger implements SlackMessenger {
+    static final class FakeMessenger implements SlackMessenger, com.docs0.slack.SlackMessengers {
+
+        /** A single-workspace fake: every tenant talks to this one workspace. */
+        @Override
+        public SlackMessenger forTenant(long tenantId) {
+            return this;
+        }
 
         record Posted(String channel, String threadTs, String text, List<LayoutBlock> blocks, String ts) {}
 

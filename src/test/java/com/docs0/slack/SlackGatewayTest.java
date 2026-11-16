@@ -39,11 +39,11 @@ class SlackGatewayTest {
     @Test
     void reportsOffAndStaysIdleWithoutTokens() {
         Docs0Properties props = props("", "");
-        SlackGateway gateway = new SlackGateway(props, new BoltSlackMessenger(props), null, null, null);
+        SlackGateway gateway = new SlackGateway(props, null, null, null, null, null);
 
         gateway.start();
 
-        assertThat(gateway.status()).isEqualTo(
+        assertThat(gateway.status(1L)).isEqualTo(
                 new StatusContributor.ComponentStatus("Slack", StatusContributor.State.OFF, "no Slack tokens configured"));
         gateway.stop();
     }
@@ -51,12 +51,12 @@ class SlackGatewayTest {
     @Test
     void reportsDownUntilConnectedWhenTokensAreSet() {
         Docs0Properties props = props("xoxb-test", "xapp-test");
-        SlackGateway gateway = new SlackGateway(props, new BoltSlackMessenger(props), null, null, null);
+        SlackGateway gateway = new SlackGateway(props, null, null, null, null, null);
 
         // Not started: status() itself never calls Slack.
-        assertThat(gateway.status().name()).isEqualTo("Slack");
-        assertThat(gateway.status().state()).isEqualTo(StatusContributor.State.DOWN);
-        assertThat(gateway.status().detail()).doesNotContain("xoxb").doesNotContain("xapp");
+        assertThat(gateway.status(1L).name()).isEqualTo("Slack");
+        assertThat(gateway.status(1L).state()).isEqualTo(StatusContributor.State.DOWN);
+        assertThat(gateway.status(1L).detail()).doesNotContain("xoxb").doesNotContain("xapp");
     }
 
     @Test
@@ -73,14 +73,16 @@ class SlackGatewayTest {
                     com.docs0.conversation.InteractionRepository.class,
                     com.docs0.feedback.FeedbackRepository.class, com.docs0.feedback.CorrectionRepository.class,
                     CorrectionDetector.class, CorrectionFlow.class, ReactionHandler.class,
-                    BoltSlackMessenger.class, IdentityService.class, com.docs0.budget.UsageLog.class,
+                    com.docs0.slack.SlackWorkspaces.class, com.docs0.crypto.TokenCipher.class,
+                    com.docs0.slack.WorkspaceSlackMessengers.class, com.docs0.tenant.local.LocalTenantResolver.class,
+                    com.docs0.tenant.local.LocalSlackPilot.class, IdentityService.class, com.docs0.budget.UsageLog.class,
                     com.docs0.settings.ChannelSettings.class, ProactiveOffers.class, ProactiveResponder.class,
                     com.docs0.stale.StaleDocs.class, QuestionHandler.class, SlackGateway.class);
             context.refresh();
 
-            assertThat(context.getBean(SlackMessenger.class)).isInstanceOf(BoltSlackMessenger.class);
+            assertThat(context.getBean(SlackMessengers.class)).isInstanceOf(WorkspaceSlackMessengers.class);
             assertThat(context.getBean(QuestionHandler.class)).isNotNull();
-            assertThat(context.getBean(StatusContributor.class).status().state())
+            assertThat(context.getBean(StatusContributor.class).status(1L).state())
                     .isEqualTo(StatusContributor.State.OFF);
         }
     }

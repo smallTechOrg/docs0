@@ -14,7 +14,6 @@ import com.docs0.source.trello.TrelloBoard;
 import com.docs0.source.trello.TrelloClient;
 import com.docs0.source.trello.TrelloConnection;
 import com.docs0.source.trello.TrelloConnector;
-import com.docs0.tenant.TenantService;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
@@ -44,7 +43,6 @@ public class ToolSourcesController {
     /** Check access stops counting here; the page then shows "2,000+". */
     static final int CHECK_CAP = 2000;
 
-    private final TenantService tenants;
     private final LinearConnection linear;
     private final LinearClient linearClient;
     private final LinearConnector linearConnector;
@@ -57,12 +55,11 @@ public class ToolSourcesController {
     private final SyncService syncService;
     private final ToolPanels panels;
 
-    public ToolSourcesController(TenantService tenants, LinearConnection linear, LinearClient linearClient,
+    public ToolSourcesController(LinearConnection linear, LinearClient linearClient,
                                  LinearConnector linearConnector, TrelloConnection trello,
                                  TrelloClient trelloClient, TrelloConnector trelloConnector,
                                  GrainConnection grain, GrainClient grainClient, GrainConnector grainConnector,
                                  SyncService syncService, ToolPanels panels) {
-        this.tenants = tenants;
         this.linear = linear;
         this.linearClient = linearClient;
         this.linearConnector = linearConnector;
@@ -79,7 +76,7 @@ public class ToolSourcesController {
     // ---- Linear ---------------------------------------------------------------------------
 
     @PostMapping(LINEAR + "/connect")
-    public RedirectView connectLinear(@RequestParam(name = "apiKey", required = false) String apiKey,
+    public RedirectView connectLinear(AdminPrincipal admin, @RequestParam(name = "apiKey", required = false) String apiKey,
                                       RedirectAttributes flash) {
         if (!linear.canStoreSecrets()) {
             return failed(flash, "Linear needs DOCS0_ENCRYPTION_KEY to be set first. See the README.", "linear");
@@ -98,7 +95,7 @@ public class ToolSourcesController {
             return failed(flash, "Could not reach Linear to test the key. Try again in a moment. Nothing was saved.",
                     "linear");
         }
-        long tenantId = tenants.current().id();
+        long tenantId = admin.tenantId();
         String account = firstNonBlank(viewer.workspaceName(), viewer.userName(), "a Linear workspace");
         linear.connect(tenantId, account, key);
         panels.forget(tenantId);
@@ -107,9 +104,9 @@ public class ToolSourcesController {
     }
 
     @PostMapping(LINEAR + "/teams")
-    public RedirectView saveTeams(@RequestParam(name = "choice", required = false) List<String> choice,
+    public RedirectView saveTeams(AdminPrincipal admin, @RequestParam(name = "choice", required = false) List<String> choice,
                                   RedirectAttributes flash) {
-        long tenantId = tenants.current().id();
+        long tenantId = admin.tenantId();
         if (linear.credential(tenantId).isEmpty()) {
             return failed(flash, "Connect Linear first.", "linear");
         }
@@ -133,8 +130,8 @@ public class ToolSourcesController {
     }
 
     @PostMapping(LINEAR + "/check")
-    public RedirectView checkLinear(RedirectAttributes flash) {
-        long tenantId = tenants.current().id();
+    public RedirectView checkLinear(AdminPrincipal admin, RedirectAttributes flash) {
+        long tenantId = admin.tenantId();
         List<LinearTeam> teams = linear.teams(tenantId);
         if (linear.credential(tenantId).isEmpty() || teams.isEmpty()) {
             return failed(flash, "Connect Linear and choose a team first.", "linear");
@@ -156,21 +153,21 @@ public class ToolSourcesController {
     }
 
     @PostMapping(LINEAR + "/sync")
-    public RedirectView syncLinear(RedirectAttributes flash) {
-        if (linear.credential(tenants.current().id()).isEmpty()) {
+    public RedirectView syncLinear(AdminPrincipal admin, RedirectAttributes flash) {
+        if (linear.credential(admin.tenantId()).isEmpty()) {
             return failed(flash, "Connect Linear first.", "linear");
         }
-        if (!syncService.startInBackground(linearConnector)) {
+        if (!syncService.startInBackground(admin.tenantId(), linearConnector)) {
             flash.addFlashAttribute("notice", "A Linear sync is already running.");
         }
         return to("linear");
     }
 
     @PostMapping(LINEAR + "/disconnect")
-    public RedirectView disconnectLinear(RedirectAttributes flash) {
-        long tenantId = tenants.current().id();
+    public RedirectView disconnectLinear(AdminPrincipal admin, RedirectAttributes flash) {
+        long tenantId = admin.tenantId();
         Optional<Source> source = linear.source(tenantId);
-        if (source.isPresent() && syncService.isRunning(source.get().id())) {
+        if (source.isPresent() && syncService.isRunning(admin.tenantId(), source.get().id())) {
             return failed(flash, "A sync is running. Disconnect when it has finished.", "linear");
         }
         linear.disconnect(tenantId);
@@ -182,7 +179,7 @@ public class ToolSourcesController {
     // ---- Trello ---------------------------------------------------------------------------
 
     @PostMapping(TRELLO + "/connect")
-    public RedirectView connectTrello(@RequestParam(name = "apiKey", required = false) String apiKey,
+    public RedirectView connectTrello(AdminPrincipal admin, @RequestParam(name = "apiKey", required = false) String apiKey,
                                       @RequestParam(name = "token", required = false) String token,
                                       RedirectAttributes flash) {
         if (!trello.canStoreSecrets()) {
@@ -204,7 +201,7 @@ public class ToolSourcesController {
             return failed(flash, "Could not reach Trello to test the key. Try again in a moment. Nothing was saved.",
                     "trello");
         }
-        long tenantId = tenants.current().id();
+        long tenantId = admin.tenantId();
         String name = firstNonBlank(account.fullName(), account.username(), "a Trello account");
         if (account.username() != null && !account.username().isBlank() && !name.equals(account.username())) {
             name = name + " (@" + account.username() + ")";
@@ -216,9 +213,9 @@ public class ToolSourcesController {
     }
 
     @PostMapping(TRELLO + "/boards")
-    public RedirectView saveBoards(@RequestParam(name = "choice", required = false) List<String> choice,
+    public RedirectView saveBoards(AdminPrincipal admin, @RequestParam(name = "choice", required = false) List<String> choice,
                                    RedirectAttributes flash) {
-        long tenantId = tenants.current().id();
+        long tenantId = admin.tenantId();
         if (trello.credential(tenantId).isEmpty()) {
             return failed(flash, "Connect Trello first.", "trello");
         }
@@ -242,8 +239,8 @@ public class ToolSourcesController {
     }
 
     @PostMapping(TRELLO + "/check")
-    public RedirectView checkTrello(RedirectAttributes flash) {
-        long tenantId = tenants.current().id();
+    public RedirectView checkTrello(AdminPrincipal admin, RedirectAttributes flash) {
+        long tenantId = admin.tenantId();
         List<TrelloBoard> boards = trello.boards(tenantId);
         if (trello.credential(tenantId).isEmpty() || boards.isEmpty()) {
             return failed(flash, "Connect Trello and choose a board first.", "trello");
@@ -266,21 +263,21 @@ public class ToolSourcesController {
     }
 
     @PostMapping(TRELLO + "/sync")
-    public RedirectView syncTrello(RedirectAttributes flash) {
-        if (trello.credential(tenants.current().id()).isEmpty()) {
+    public RedirectView syncTrello(AdminPrincipal admin, RedirectAttributes flash) {
+        if (trello.credential(admin.tenantId()).isEmpty()) {
             return failed(flash, "Connect Trello first.", "trello");
         }
-        if (!syncService.startInBackground(trelloConnector)) {
+        if (!syncService.startInBackground(admin.tenantId(), trelloConnector)) {
             flash.addFlashAttribute("notice", "A Trello sync is already running.");
         }
         return to("trello");
     }
 
     @PostMapping(TRELLO + "/disconnect")
-    public RedirectView disconnectTrello(RedirectAttributes flash) {
-        long tenantId = tenants.current().id();
+    public RedirectView disconnectTrello(AdminPrincipal admin, RedirectAttributes flash) {
+        long tenantId = admin.tenantId();
         Optional<Source> source = trello.source(tenantId);
-        if (source.isPresent() && syncService.isRunning(source.get().id())) {
+        if (source.isPresent() && syncService.isRunning(admin.tenantId(), source.get().id())) {
             return failed(flash, "A sync is running. Disconnect when it has finished.", "trello");
         }
         trello.disconnect(tenantId);
@@ -292,7 +289,7 @@ public class ToolSourcesController {
     // ---- Grain ----------------------------------------------------------------------------
 
     @PostMapping(GRAIN + "/connect")
-    public RedirectView connectGrain(@RequestParam(name = "token", required = false) String token,
+    public RedirectView connectGrain(AdminPrincipal admin, @RequestParam(name = "token", required = false) String token,
                                      RedirectAttributes flash) {
         if (!grain.canStoreSecrets()) {
             return failed(flash, "Grain needs DOCS0_ENCRYPTION_KEY to be set first. See the README.", "grain");
@@ -312,14 +309,14 @@ public class ToolSourcesController {
                     "grain");
         }
         String name = firstNonBlank(account.name(), "a Grain account");
-        grain.connect(tenants.current().id(), name, secret);
+        grain.connect(admin.tenantId(), name, secret);
         flash.addFlashAttribute("notice", "Connected to " + name + ". Recordings are indexed at the next sync.");
         return to("grain");
     }
 
     @PostMapping(GRAIN + "/check")
-    public RedirectView checkGrain(RedirectAttributes flash) {
-        long tenantId = tenants.current().id();
+    public RedirectView checkGrain(AdminPrincipal admin, RedirectAttributes flash) {
+        long tenantId = admin.tenantId();
         if (grain.credential(tenantId).isEmpty()) {
             return failed(flash, "Connect Grain first.", "grain");
         }
@@ -337,21 +334,21 @@ public class ToolSourcesController {
     }
 
     @PostMapping(GRAIN + "/sync")
-    public RedirectView syncGrain(RedirectAttributes flash) {
-        if (grain.credential(tenants.current().id()).isEmpty()) {
+    public RedirectView syncGrain(AdminPrincipal admin, RedirectAttributes flash) {
+        if (grain.credential(admin.tenantId()).isEmpty()) {
             return failed(flash, "Connect Grain first.", "grain");
         }
-        if (!syncService.startInBackground(grainConnector)) {
+        if (!syncService.startInBackground(admin.tenantId(), grainConnector)) {
             flash.addFlashAttribute("notice", "A Grain sync is already running.");
         }
         return to("grain");
     }
 
     @PostMapping(GRAIN + "/disconnect")
-    public RedirectView disconnectGrain(RedirectAttributes flash) {
-        long tenantId = tenants.current().id();
+    public RedirectView disconnectGrain(AdminPrincipal admin, RedirectAttributes flash) {
+        long tenantId = admin.tenantId();
         Optional<Source> source = grain.source(tenantId);
-        if (source.isPresent() && syncService.isRunning(source.get().id())) {
+        if (source.isPresent() && syncService.isRunning(admin.tenantId(), source.get().id())) {
             return failed(flash, "A sync is running. Disconnect when it has finished.", "grain");
         }
         grain.disconnect(tenantId);

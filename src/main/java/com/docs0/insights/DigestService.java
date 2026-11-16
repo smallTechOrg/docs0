@@ -13,7 +13,9 @@ import com.docs0.insights.ThemeService.Theme;
 import com.docs0.settings.TenantSettings;
 import com.docs0.slack.AnswerRenderer;
 import com.docs0.slack.SlackMessenger;
+import com.docs0.slack.SlackMessengers;
 import com.docs0.stale.StaleDocs;
+import com.docs0.tenant.Tenant;
 import com.docs0.tenant.TenantService;
 import com.slack.api.model.block.LayoutBlock;
 import java.time.Duration;
@@ -51,26 +53,29 @@ public class DigestService {
     private final InsightsService insights;
     private final ThemeService themes;
     private final BudgetService budget;
-    private final SlackMessenger messenger;
+    private final SlackMessengers messengers;
 
     public DigestService(TenantService tenants, TenantSettings settings, InsightsService insights,
-            ThemeService themes, BudgetService budget, SlackMessenger messenger) {
+            ThemeService themes, BudgetService budget, SlackMessengers messengers) {
         this.tenants = tenants;
         this.settings = settings;
         this.insights = insights;
         this.themes = themes;
         this.budget = budget;
-        this.messenger = messenger;
+        this.messengers = messengers;
     }
 
     /** The scheduled run. Disabled by setting DOCS0_DIGEST_CRON to "-". */
     @Scheduled(cron = "${docs0.digest.cron:0 0 9 * * MON}", zone = "${docs0.digest.zone:UTC}")
     public void scheduled() {
-        try {
-            Outcome outcome = postIfDue(tenants.current().id());
-            log.info("Weekly digest run: outcome={}", outcome);
-        } catch (RuntimeException e) {
-            log.warn("Weekly digest failed: error={}", e.getClass().getName());
+        // Every active tenant in turn; one tenant's failure never stops the others.
+        for (Tenant tenant : tenants.active()) {
+            try {
+                Outcome outcome = postIfDue(tenant.id());
+                log.info("Weekly digest run: tenant={} outcome={}", tenant.id(), outcome);
+            } catch (RuntimeException e) {
+                log.warn("Weekly digest failed: tenant={} error={}", tenant.id(), e.getClass().getName());
+            }
         }
     }
 
@@ -126,9 +131,10 @@ public class DigestService {
         Gaps gaps = insights.gaps(tenantId, since);
         List<StaleDocs.Row> stale = insights.staleDocuments(tenantId, since);
         ThemeService.Result themeResult = themes.themes(tenantId, DAYS);
-        Set<String> publicChannels = publicChannels();
-        List<LayoutBlock> blocks = blocks(totals, themeResult, gaps, stale, publicChannels);
+        List<LayoutBlock> blocks;
         try {
+            SlackMessenger messenger = messengers.forTenant(tenantId);
+            blocks = blocks(totals, themeResult, gaps, stale, publicChannels(messenger));
             messenger.postMessage(channel, null, "docs0 weekly digest", blocks);
         } catch (RuntimeException e) {
             log.warn("Weekly digest could not be posted: tenant={} error={}", tenantId,
@@ -141,7 +147,7 @@ public class DigestService {
     }
 
     /** Ids of public channels. Empty when Slack cannot say: then no question is quoted. */
-    private Set<String> publicChannels() {
+    private static Set<String> publicChannels(SlackMessenger messenger) {
         try {
             Set<String> ids = new HashSet<>();
             for (SlackMessenger.ChannelInfo c : messenger.listChannels()) {

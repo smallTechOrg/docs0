@@ -37,13 +37,15 @@ public class StatusService {
         this.contributors = contributors;
     }
 
-    public Snapshot snapshot() {
-        Tenant tenant = tenants.current();
+    /** What the status page shows for one tenant. Only that tenant's name, counts and integrations; never another's. */
+    public Snapshot snapshot(long tenantId) {
+        Tenant tenant = tenants.findById(tenantId).orElseThrow(
+                () -> new IllegalArgumentException("Unknown tenant " + tenantId));
         List<ComponentStatus> components = new ArrayList<>();
         components.add(ComponentStatus.up("Database", "connected"));
         for (StatusContributor c : contributors) {
             try {
-                components.add(c.status());
+                components.add(c.status(tenant.id()));
             } catch (RuntimeException e) {
                 components.add(ComponentStatus.down(c.getClass().getSimpleName(), e.getClass().getSimpleName()));
             }
@@ -72,6 +74,6 @@ public class StatusService {
                 .optional();
 
         return new Snapshot(tenant.name(), components, documents, questions,
-                pendingCorrections, budget.spentThisMonth(tenant.id()), budget.monthlyCap(), lastSync);
+                pendingCorrections, budget.spentThisMonth(tenant.id()), budget.monthlyCap(tenant.id()), lastSync);
     }
 }

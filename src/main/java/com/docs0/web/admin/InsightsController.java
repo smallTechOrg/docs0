@@ -7,6 +7,7 @@ import com.docs0.insights.InsightsService.Gaps;
 import com.docs0.insights.InsightsService.Totals;
 import com.docs0.insights.ThemeService;
 import com.docs0.slack.SlackMessenger;
+import com.docs0.slack.SlackMessengers;
 import com.docs0.slack.SlackMessenger.ChannelInfo;
 import com.docs0.stale.StaleDocs;
 import com.docs0.tenant.TenantService;
@@ -77,22 +78,22 @@ public class InsightsController {
     private final ThemeService themes;
     private final DigestService digest;
     private final StaleDocs staleDocs;
-    private final SlackMessenger messenger;
+    private final SlackMessengers messengers;
 
     public InsightsController(TenantService tenants, InsightsService insights, ThemeService themes,
-            DigestService digest, StaleDocs staleDocs, SlackMessenger messenger) {
+            DigestService digest, StaleDocs staleDocs, SlackMessengers messengers) {
         this.tenants = tenants;
         this.insights = insights;
         this.themes = themes;
         this.digest = digest;
         this.staleDocs = staleDocs;
-        this.messenger = messenger;
+        this.messengers = messengers;
     }
 
     @GetMapping(PAGE)
-    public String page(HttpServletRequest request, @RequestParam(name = "days", required = false) Integer daysParam,
+    public String page(AdminPrincipal admin, HttpServletRequest request, @RequestParam(name = "days", required = false) Integer daysParam,
             @RequestParam(name = "notice", required = false) String notice, Model model) {
-        long tenantId = tenants.current().id();
+        long tenantId = admin.tenantId();
         int days = InsightsService.period(daysParam);
         Instant since = Instant.now().minus(Duration.ofDays(days));
 
@@ -116,7 +117,7 @@ public class InsightsController {
         String chosen = digest.channel(tenantId).orElse("");
         try {
             channels = new ArrayList<>();
-            for (ChannelInfo c : messenger.listChannels()) {
+            for (ChannelInfo c : messengers.forTenant(admin.tenantId()).listChannels()) {
                 channels.add(new ChannelChoice(c.id(), c.name(), c.isPrivate(), c.id().equals(chosen)));
             }
             channels.sort(Comparator.comparing((ChannelChoice c) -> c.name().toLowerCase(Locale.ROOT)));
@@ -125,7 +126,7 @@ public class InsightsController {
         }
 
         model.addAttribute("csrf", AdminGuard.csrfToken(request.getSession()));
-        model.addAttribute("tenantName", tenants.current().name());
+        model.addAttribute("tenantName", tenants.name(admin.tenantId()));
         model.addAttribute("days", days);
         model.addAttribute("periods", InsightsService.PERIODS);
         model.addAttribute("notice", notice == null ? null : NOTICES.get(notice));
@@ -149,9 +150,9 @@ public class InsightsController {
     }
 
     @PostMapping(PAGE + "/refresh")
-    public RedirectView refresh(@RequestParam(name = "days", required = false) Integer days) {
+    public RedirectView refresh(AdminPrincipal admin, @RequestParam(name = "days", required = false) Integer days) {
         int period = InsightsService.period(days);
-        ThemeService.Result result = themes.refresh(tenants.current().id(), period);
+        ThemeService.Result result = themes.refresh(admin.tenantId(), period);
         String notice = result.tooSoon() ? "too-soon" : switch (result.status()) {
             case OK -> "refreshed";
             case FAILED -> "themes-failed";
@@ -163,16 +164,16 @@ public class InsightsController {
     }
 
     @PostMapping(PAGE + "/digest/channel")
-    public RedirectView digestChannel(@RequestParam(name = "channel", required = false) String channel,
+    public RedirectView digestChannel(AdminPrincipal admin, @RequestParam(name = "channel", required = false) String channel,
             @RequestParam(name = "days", required = false) Integer days) {
-        long tenantId = tenants.current().id();
+        long tenantId = admin.tenantId();
         int period = InsightsService.period(days);
         if (channel == null || channel.isBlank()) {
             digest.setChannel(tenantId, null, null);
             return to(period, "channel-off");
         }
         try {
-            for (ChannelInfo c : messenger.listChannels()) {
+            for (ChannelInfo c : messengers.forTenant(admin.tenantId()).listChannels()) {
                 if (c.id().equals(channel)) {
                     digest.setChannel(tenantId, c.id(), c.name());
                     return to(period, "channel-saved");
@@ -185,9 +186,9 @@ public class InsightsController {
     }
 
     @PostMapping(PAGE + "/digest/now")
-    public RedirectView digestNow(@RequestParam(name = "days", required = false) Integer days) {
+    public RedirectView digestNow(AdminPrincipal admin, @RequestParam(name = "days", required = false) Integer days) {
         int period = InsightsService.period(days);
-        String notice = switch (digest.postNow(tenants.current().id())) {
+        String notice = switch (digest.postNow(admin.tenantId())) {
             case POSTED -> "posted";
             case NO_CHANNEL -> "digest-no-channel";
             case OVER_BUDGET -> "digest-budget";
@@ -197,8 +198,8 @@ public class InsightsController {
     }
 
     @PostMapping(PAGE + "/stale/{documentId}/ping")
-    public RedirectView ping(@PathVariable long documentId, @RequestParam(name = "days", required = false) Integer days) {
-        String notice = switch (staleDocs.askOwner(tenants.current().id(), documentId)) {
+    public RedirectView ping(AdminPrincipal admin, @PathVariable long documentId, @RequestParam(name = "days", required = false) Integer days) {
+        String notice = switch (staleDocs.askOwner(admin.tenantId(), documentId)) {
             case SENT -> "pinged";
             case NO_OWNER -> "ping-no-owner";
             case NOT_IN_SLACK -> "ping-not-in-slack";

@@ -11,7 +11,6 @@ import com.docs0.source.gmail.GmailConnection;
 import com.docs0.source.gmail.GmailConnector;
 import com.docs0.source.gmail.GmailKey;
 import com.docs0.source.gmail.Mailbox;
-import com.docs0.tenant.TenantService;
 import jakarta.servlet.http.HttpServletRequest;
 import java.io.IOException;
 import java.io.Serializable;
@@ -45,16 +44,14 @@ public class GmailController {
     private static final String BASE = SourcesController.PAGE + "/gmail";
     private static final String VIEWERS = "viewers:";
 
-    private final TenantService tenants;
     private final GmailConnection connection;
     private final GmailClient client;
     private final GmailConnector connector;
     private final GmailPanel panel;
     private final SyncService syncService;
 
-    public GmailController(TenantService tenants, GmailConnection connection, GmailClient client,
+    public GmailController(GmailConnection connection, GmailClient client,
                            GmailConnector connector, GmailPanel panel, SyncService syncService) {
-        this.tenants = tenants;
         this.connection = connection;
         this.client = client;
         this.connector = connector;
@@ -63,7 +60,7 @@ public class GmailController {
     }
 
     @PostMapping(BASE + "/connect")
-    public RedirectView connect(@RequestParam(name = "key", required = false) String key, RedirectAttributes flash) {
+    public RedirectView connect(AdminPrincipal admin, @RequestParam(name = "key", required = false) String key, RedirectAttributes flash) {
         if (!connection.canStoreSecrets()) {
             return failed(flash, "Gmail needs DOCS0_ENCRYPTION_KEY to be set first. See the README.");
         }
@@ -72,17 +69,17 @@ public class GmailController {
             return failed(flash, "That is not a Google service account key. Paste the whole JSON file you "
                     + "downloaded from Google Cloud. Nothing was saved.");
         }
-        connection.connect(tenants.current().id(), account.get(), key.strip());
+        connection.connect(admin.tenantId(), account.get(), key.strip());
         flash.addFlashAttribute("notice", "Key saved for " + account.get().email() + ". Now authorise it in the "
                 + "Workspace Admin console (steps below) and choose the mailboxes.");
         return to();
     }
 
     @PostMapping(BASE + "/mailboxes")
-    public RedirectView save(@RequestParam(name = "mailbox", required = false) List<String> ticked,
+    public RedirectView save(AdminPrincipal admin, @RequestParam(name = "mailbox", required = false) List<String> ticked,
                              @RequestParam(name = "newMailboxes", required = false) String typed,
                              HttpServletRequest request, RedirectAttributes flash) {
-        long tenantId = tenants.current().id();
+        long tenantId = admin.tenantId();
         if (connection.credential(tenantId).isEmpty()) {
             return failed(flash, "Add the service account key first.");
         }
@@ -140,19 +137,19 @@ public class GmailController {
     }
 
     @PostMapping(BASE + "/directory")
-    public RedirectView loadDirectory(@RequestParam(name = "adminEmail", required = false) String adminEmail,
+    public RedirectView loadDirectory(AdminPrincipal admin, @RequestParam(name = "adminEmail", required = false) String adminEmail,
                                       RedirectAttributes flash) {
-        long tenantId = tenants.current().id();
+        long tenantId = admin.tenantId();
         if (connection.credential(tenantId).isEmpty()) {
             return failed(flash, "Add the service account key first.");
         }
         if (!Mailbox.valid(adminEmail)) {
             return failed(flash, "Type the email of a Google Workspace administrator first.");
         }
-        String admin = adminEmail.strip().toLowerCase(Locale.ROOT);
+        String workspaceAdmin = adminEmail.strip().toLowerCase(Locale.ROOT);
         try {
-            List<DirectoryUser> users = client.directory(connection.keyJson(tenantId), admin);
-            connection.setAdminEmail(tenantId, admin);
+            List<DirectoryUser> users = client.directory(connection.keyJson(tenantId), workspaceAdmin);
+            connection.setAdminEmail(tenantId, workspaceAdmin);
             panel.remember(tenantId, users);
             flash.addFlashAttribute("notice", users.isEmpty()
                     ? "Google returned no people."
@@ -168,8 +165,8 @@ public class GmailController {
     }
 
     @PostMapping(BASE + "/check")
-    public RedirectView check(RedirectAttributes flash) {
-        long tenantId = tenants.current().id();
+    public RedirectView check(AdminPrincipal admin, RedirectAttributes flash) {
+        long tenantId = admin.tenantId();
         List<Mailbox> mailboxes = connection.mailboxes(tenantId);
         if (connection.credential(tenantId).isEmpty() || mailboxes.isEmpty()) {
             return failed(flash, "Add the key and choose at least one mailbox first.");
@@ -198,21 +195,21 @@ public class GmailController {
     }
 
     @PostMapping(BASE + "/sync")
-    public RedirectView sync(RedirectAttributes flash) {
-        if (connection.credential(tenants.current().id()).isEmpty()) {
+    public RedirectView sync(AdminPrincipal admin, RedirectAttributes flash) {
+        if (connection.credential(admin.tenantId()).isEmpty()) {
             return failed(flash, "Add the service account key first.");
         }
-        if (!syncService.startInBackground(connector)) {
+        if (!syncService.startInBackground(admin.tenantId(), connector)) {
             flash.addFlashAttribute("notice", "A Gmail sync is already running.");
         }
         return to();
     }
 
     @PostMapping(BASE + "/disconnect")
-    public RedirectView disconnect(RedirectAttributes flash) {
-        long tenantId = tenants.current().id();
+    public RedirectView disconnect(AdminPrincipal admin, RedirectAttributes flash) {
+        long tenantId = admin.tenantId();
         Optional<Source> source = connection.source(tenantId);
-        if (source.isPresent() && syncService.isRunning(source.get().id())) {
+        if (source.isPresent() && syncService.isRunning(admin.tenantId(), source.get().id())) {
             return failed(flash, "A sync is running. Disconnect when it has finished.");
         }
         connection.disconnect(tenantId);

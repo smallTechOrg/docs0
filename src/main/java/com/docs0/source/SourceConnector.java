@@ -12,8 +12,11 @@ public interface SourceConnector {
     /** SHARED or RESTRICTED. */
     String visibility();
 
-    /** False when there is nothing to sync (not connected, nothing chosen); it is then skipped on the schedule. */
-    boolean configured();
+    /**
+     * False when there is nothing to sync for this tenant (not connected, nothing chosen); the tenant is then
+     * skipped on the schedule.
+     */
+    boolean configured(long tenantId);
 
     /**
      * Brings the tenant's documents of this source up to date. One bad item must be counted

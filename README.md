@@ -285,6 +285,16 @@ Drive, Linear and Trello, the document count, the last sync and this month's spe
 Sources page. `/health` returns the same as JSON. The app starts even when a credential is missing; the status page says
 what is not set up.
 
+### Multiple companies
+
+docs0's data is organised per company (tenant), and the code no longer assumes there is only one: admin pages,
+Slack events and scheduled jobs each work for an explicitly named company, and a second company's documents,
+corrections, spend and Slack workspace can never reach the first. **The pilot setup above is unchanged**: one
+tenant created from `DOCS0_TENANT_SLUG`/`DOCS0_TENANT_NAME`, one admin password, Slack over Socket Mode with the
+tokens from `.env`. At startup docs0 registers that Slack workspace for the tenant (it stores the bot token
+encrypted, so `DOCS0_ENCRYPTION_KEY` must be set). Adding further companies through Slack install and per-company
+admin sign-in arrives in Phase 7b; see [spec/capabilities.md](spec/capabilities.md) (C11).
+
 ## Use
 
 - Mention it in a channel: `@docs0 what is our refund policy?` It answers in a thread.
@@ -345,7 +355,8 @@ it says so, asks a clarifying question, or names who might know.
 ```
 
 Tests run against the real `docs0_test` Postgres database. They never use real Slack,
-Drive or Anthropic credentials.
+Drive or Anthropic credentials. `com.docs0.isolation` holds the two-company tests that prove one company
+never sees or changes the other's data.
 
 ## Design
 

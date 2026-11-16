@@ -62,7 +62,7 @@ class ActionHandlerTest {
                 new Docs0Properties.Anthropic("", "m", new BigDecimal("2"), new BigDecimal("10"), 12),
                 new Docs0Properties.Budget(new BigDecimal("100")), new Docs0Properties.Slack("", ""),
                 new Docs0Properties.Drive(15, false), null, "", "", "");
-        tenants = new TenantService(jdbc, props);
+        tenants = new TenantService(jdbc);
         TokenCipher cipher = new TokenCipher(DriveTestSetup.ENCRYPTION_KEY);
         SourceRepository sources = new SourceRepository(jdbc);
         SourceCredentialRepository credentials = new SourceCredentialRepository(jdbc);
@@ -97,7 +97,7 @@ class ActionHandlerTest {
     }
 
     private void click(PendingAction draft, String user, String actionId) throws Exception {
-        handler.handle(CHANNEL, "9000.0007", "100.1", user, actionId, String.valueOf(draft.id())).get();
+        handler.handle(tenantId, CHANNEL, "9000.0007", "100.1", user, actionId, String.valueOf(draft.id())).get();
     }
 
     private Status status(PendingAction draft) {
@@ -169,8 +169,8 @@ class ActionHandlerTest {
     void aDoubleClickCreatesOneItemAndTheSecondClickIsToldItIsDone() throws Exception {
         PendingAction draft = issueDraft("U1");
 
-        CompletableFuture<Void> first = handler.handle(CHANNEL, "9000.0007", "100.1", "U1", "draft_create", String.valueOf(draft.id()));
-        CompletableFuture<Void> second = handler.handle(CHANNEL, "9000.0007", "100.1", "U1", "draft_create", String.valueOf(draft.id()));
+        CompletableFuture<Void> first = handler.handle(tenantId, CHANNEL, "9000.0007", "100.1", "U1", "draft_create", String.valueOf(draft.id()));
+        CompletableFuture<Void> second = handler.handle(tenantId, CHANNEL, "9000.0007", "100.1", "U1", "draft_create", String.valueOf(draft.id()));
         CompletableFuture.allOf(first, second).get();
 
         assertThat(linearApi.creates).hasSize(1);
@@ -225,11 +225,11 @@ class ActionHandlerTest {
     void clicksThatMakeNoSenseAreIgnored() throws Exception {
         PendingAction draft = issueDraft("U1");
 
-        handler.handle(CHANNEL, "9000.1", "100.1", "U1", "draft_create", "not-a-number").get();
-        handler.handle(CHANNEL, "9000.1", "100.1", "U1", "something_else", String.valueOf(draft.id())).get();
-        handler.handle(null, "9000.1", "100.1", "U1", "draft_create", String.valueOf(draft.id())).get();
-        handler.handle(CHANNEL, "9000.1", "100.1", "U1", "draft_create", null).get();
-        handler.handle(CHANNEL, "9000.1", "100.1", "U1", "draft_create", "999999").get();
+        handler.handle(tenantId, CHANNEL, "9000.1", "100.1", "U1", "draft_create", "not-a-number").get();
+        handler.handle(tenantId, CHANNEL, "9000.1", "100.1", "U1", "something_else", String.valueOf(draft.id())).get();
+        handler.handle(tenantId, null, "9000.1", "100.1", "U1", "draft_create", String.valueOf(draft.id())).get();
+        handler.handle(tenantId, CHANNEL, "9000.1", "100.1", "U1", "draft_create", null).get();
+        handler.handle(tenantId, CHANNEL, "9000.1", "100.1", "U1", "draft_create", "999999").get();
 
         assertThat(linearApi.creates).isEmpty();
         assertThat(status(draft)).isEqualTo(Status.PENDING);

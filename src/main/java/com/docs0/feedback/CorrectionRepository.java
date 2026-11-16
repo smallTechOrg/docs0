@@ -28,13 +28,16 @@ public class CorrectionRepository implements CorrectionSource {
         this.jdbc = jdbc;
     }
 
-    /** Stores a new pending correction and returns its id. */
+    /** Stores a new pending correction and returns its id. The interaction, when given, must belong to the tenant. */
     public long insertPending(long tenantId, Long interactionId, String authorSlackId, String authorName,
             String question, String originalAnswer, String correctionText, boolean fromDm) {
         return jdbc.sql("""
                         INSERT INTO correction (tenant_id, interaction_id, author_slack_id, author_name, question,
                             original_answer, correction_text, from_dm)
-                        VALUES (:tenantId, :interactionId, :authorId, :authorName, :question, :answer, :text, :fromDm)
+                        SELECT :tenantId, CAST(:interactionId AS bigint), :authorId, :authorName, :question, :answer,
+                               :text, :fromDm
+                        WHERE CAST(:interactionId AS bigint) IS NULL
+                           OR EXISTS (SELECT 1 FROM interaction i WHERE i.id = :interactionId AND i.tenant_id = :tenantId)
                         RETURNING id
                         """)
                 .param("tenantId", tenantId)

@@ -77,3 +77,6 @@ root.
 
 - **Goal.** A second company can install and connect its own tools. Capability C11.
 - **Gate.** `./mvnw -q verify` including cross-tenant isolation tests.
+- **7a (done).** Explicit tenants everywhere, a Slack workspace registry with a client per tenant, per-tenant
+  budget and suspension, an isolation audit and two-tenant isolation tests. The pilot is unchanged.
+- **7b (next).** Slack OAuth install, HTTP Events API, per-tenant admin sign-in, self-serve source connection.

@@ -2,6 +2,7 @@ package com.docs0.web.admin;
 
 import com.docs0.settings.ChannelSettings;
 import com.docs0.slack.SlackMessenger;
+import com.docs0.slack.SlackMessengers;
 import com.docs0.slack.SlackMessenger.ChannelInfo;
 import com.docs0.tenant.TenantService;
 import jakarta.servlet.http.HttpServletRequest;
@@ -29,27 +30,27 @@ public class ChannelsController {
     public record Row(String id, String name, boolean isPrivate, boolean member, boolean proactive) {}
 
     private final TenantService tenants;
-    private final SlackMessenger messenger;
+    private final SlackMessengers messengers;
     private final ChannelSettings settings;
     private final int maxPerHour;
 
-    public ChannelsController(TenantService tenants, SlackMessenger messenger, ChannelSettings settings,
+    public ChannelsController(TenantService tenants, SlackMessengers messengers, ChannelSettings settings,
             @Value("${docs0.proactive.max-per-hour:3}") int maxPerHour) {
         this.tenants = tenants;
-        this.messenger = messenger;
+        this.messengers = messengers;
         this.settings = settings;
         this.maxPerHour = maxPerHour;
     }
 
     @GetMapping(PAGE)
-    public String page(HttpServletRequest request, Model model) {
-        long tenantId = tenants.current().id();
+    public String page(AdminPrincipal admin, HttpServletRequest request, Model model) {
+        long tenantId = admin.tenantId();
         List<Row> rows = null;
         String error = null;
         try {
             Set<String> on = settings.proactiveChannels(tenantId);
             rows = new ArrayList<>();
-            for (ChannelInfo c : messenger.listChannels()) {
+            for (ChannelInfo c : messengers.forTenant(admin.tenantId()).listChannels()) {
                 rows.add(new Row(c.id(), c.name(), c.isPrivate(), c.member(), on.contains(c.id())));
             }
             rows.sort(Comparator.comparing((Row r) -> r.name().toLowerCase(Locale.ROOT)));
@@ -57,7 +58,7 @@ public class ChannelsController {
             error = SlackHistoryPanel.describe(e);
         }
         model.addAttribute("csrf", AdminGuard.csrfToken(request.getSession()));
-        model.addAttribute("tenantName", tenants.current().name());
+        model.addAttribute("tenantName", tenants.name(admin.tenantId()));
         model.addAttribute("channels", rows);
         model.addAttribute("loadError", error);
         model.addAttribute("maxPerHour", maxPerHour);
@@ -65,12 +66,12 @@ public class ChannelsController {
     }
 
     @PostMapping(PAGE)
-    public RedirectView save(@RequestParam(name = "proactive", required = false) List<String> proactive,
+    public RedirectView save(AdminPrincipal admin, @RequestParam(name = "proactive", required = false) List<String> proactive,
             RedirectAttributes flash) {
-        long tenantId = tenants.current().id();
+        long tenantId = admin.tenantId();
         List<ChannelSettings.Channel> listed = new ArrayList<>();
         try {
-            for (ChannelInfo c : messenger.listChannels()) {
+            for (ChannelInfo c : messengers.forTenant(admin.tenantId()).listChannels()) {
                 listed.add(new ChannelSettings.Channel(c.id(), c.name()));
             }
         } catch (RuntimeException e) {

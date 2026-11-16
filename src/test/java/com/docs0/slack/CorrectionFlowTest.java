@@ -48,7 +48,7 @@ class CorrectionFlowTest {
                 new Docs0Properties.Budget(new BigDecimal("100")),
                 new Docs0Properties.Slack("", ""),
                 new Docs0Properties.Drive(15, false), null, "", "", "");
-        TenantService tenants = new TenantService(jdbc, props);
+        TenantService tenants = new TenantService(jdbc);
         ConversationRepository conversations = new ConversationRepository(jdbc);
         InteractionRepository interactions = new InteractionRepository(jdbc);
         FeedbackRepository feedback = new FeedbackRepository(jdbc);
@@ -57,14 +57,14 @@ class CorrectionFlowTest {
         handler = new QuestionHandler(tenants, agent, new FakeKnowledge(), new BudgetService(jdbc, props),
                 conversations, interactions, slack, flow, new com.docs0.action.PendingActionRepository(jdbc),
                 new IdentityService(jdbc, slack), Duration.ZERO);
-        reactions = new ReactionHandler(tenants, interactions, feedback, slack);
+        reactions = new ReactionHandler(interactions, feedback, slack);
         slack.names.put("U1", "Arjun");
         slack.names.put("U2", "Meera");
     }
 
     // An answered channel thread: question at 100.1, docs0's reply is the first post.
     private void answeredThread() throws Exception {
-        await(handler.handle(IncomingEvent.of(IncomingEvent.Kind.MENTION, CHANNEL, "U2",
+        await(handler.handle(tenantId, IncomingEvent.of(IncomingEvent.Kind.MENTION, CHANNEL, "U2",
                 "<@UBOT> what does the Team plan cost?", "100.1", null, "EvQ")));
     }
 
@@ -73,11 +73,11 @@ class CorrectionFlowTest {
     }
 
     private void thumbsDown() throws Exception {
-        reactions.handle(new ReactionEvent(true, CHANNEL, "U1", "-1", answerTs())).get(10, TimeUnit.SECONDS);
+        reactions.handle(tenantId, new ReactionEvent(true, CHANNEL, "U1", "-1", answerTs())).get(10, TimeUnit.SECONDS);
     }
 
     private CompletableFuture<Void> reply(String text, String ts, String eventId) {
-        return handler.handle(IncomingEvent.of(IncomingEvent.Kind.THREAD_REPLY, CHANNEL, "U1", text, ts, "100.1",
+        return handler.handle(tenantId, IncomingEvent.of(IncomingEvent.Kind.THREAD_REPLY, CHANNEL, "U1", text, ts, "100.1",
                 eventId));
     }
 
@@ -207,11 +207,11 @@ class CorrectionFlowTest {
 
     @Test
     void aCorrectionInADmIsFlaggedAsFromADm() throws Exception {
-        await(handler.handle(IncomingEvent.of(IncomingEvent.Kind.DIRECT_MESSAGE, DM, "U1", "what is my band?",
+        await(handler.handle(tenantId, IncomingEvent.of(IncomingEvent.Kind.DIRECT_MESSAGE, DM, "U1", "what is my band?",
                 "200.1", null, "Ev1")));
         llm.fact = "The band is L5.";
 
-        await(handler.handle(IncomingEvent.of(IncomingEvent.Kind.DIRECT_MESSAGE, DM, "U1",
+        await(handler.handle(tenantId, IncomingEvent.of(IncomingEvent.Kind.DIRECT_MESSAGE, DM, "U1",
                 "that's wrong, it's L5", "200.2", null, "Ev2")));
 
         assertThat(corrections()).singleElement().satisfies(c -> {
@@ -229,7 +229,7 @@ class CorrectionFlowTest {
         await(reply("that's wrong, it's $14", "100.5", "Ev1"));
         await(reply("that's wrong, it's $14", "100.5", "Ev1"));
         // The same message arriving again as an app_mention under another event id.
-        await(handler.handle(IncomingEvent.of(IncomingEvent.Kind.MENTION, CHANNEL, "U1",
+        await(handler.handle(tenantId, IncomingEvent.of(IncomingEvent.Kind.MENTION, CHANNEL, "U1",
                 "<@UBOT> that's wrong, it's $14", "100.5", "100.1", "Ev2")));
 
         assertThat(corrections()).hasSize(1);
@@ -261,7 +261,7 @@ class CorrectionFlowTest {
 
     @Test
     void aReplyInAThreadDocs0NeverAnsweredIsStillIgnored() throws Exception {
-        await(handler.handle(IncomingEvent.of(IncomingEvent.Kind.THREAD_REPLY, CHANNEL, "U1", "that's wrong",
+        await(handler.handle(tenantId, IncomingEvent.of(IncomingEvent.Kind.THREAD_REPLY, CHANNEL, "U1", "that's wrong",
                 "300.2", "300.1", "Ev1")));
 
         assertThat(llm.asked).isEmpty();

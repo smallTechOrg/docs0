@@ -1,6 +1,5 @@
 package com.docs0.source;
 
-import com.docs0.tenant.Tenant;
 import com.docs0.tenant.TenantService;
 import java.util.Optional;
 import java.util.Set;
@@ -9,7 +8,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
-/** Runs a connector for the current tenant and records the run in the sync log. */
+/** Runs a connector for a tenant and records the run in the sync log. */
 @Service
 public class SyncService {
 
@@ -19,8 +18,11 @@ public class SyncService {
     private final TenantService tenants;
     private final SourceRepository sources;
     private final SyncRunRepository runs;
-    /** Ids of sources being synced right now. One app instance, so an in-process guard is enough. */
-    private final Set<Long> running = ConcurrentHashMap.newKeySet();
+    /** A source being synced. Keyed by tenant as well as source, so no two tenants can ever share a guard. */
+    private record RunKey(long tenantId, long sourceId) {}
+
+    /** Sources being synced right now. One app instance, so an in-process guard is enough. */
+    private final Set<RunKey> running = ConcurrentHashMap.newKeySet();
 
     public SyncService(TenantService tenants, SourceRepository sources, SyncRunRepository runs) {
         this.tenants = tenants;
@@ -29,23 +31,23 @@ public class SyncService {
     }
 
     /** A run that has been recorded as started and holds the guard of its source. */
-    private record Started(SourceConnector connector, Tenant tenant, Source source, long runId) {}
+    private record Started(SourceConnector connector, long tenantId, Source source, long runId) {}
 
     /**
-     * Syncs one source and returns the finished run (OK or FAILED). Returns empty, without
-     * doing anything, when a sync of the same source is already in progress. Never throws
-     * for a connector failure: that is recorded on the run.
+     * Syncs one source of the tenant and returns the finished run (OK or FAILED). Returns empty, without
+     * doing anything, when a sync of the same source is already in progress or the tenant is suspended.
+     * Never throws for a connector failure: that is recorded on the run.
      */
-    public Optional<SyncRun> run(SourceConnector connector) {
-        return begin(connector).map(this::complete);
+    public Optional<SyncRun> run(long tenantId, SourceConnector connector) {
+        return begin(tenantId, connector).map(this::complete);
     }
 
     /**
      * Starts a sync on its own thread and returns at once. The run is already in the sync
-     * log as RUNNING when this returns. False when a sync of the source is in progress.
+     * log as RUNNING when this returns. False when a sync of the source is in progress or the tenant is suspended.
      */
-    public boolean startInBackground(SourceConnector connector) {
-        Optional<Started> started = begin(connector);
+    public boolean startInBackground(long tenantId, SourceConnector connector) {
+        Optional<Started> started = begin(tenantId, connector);
         started.ifPresent(s -> Thread.ofVirtual().name("sync-now").start(() -> {
             try {
                 complete(s);
@@ -56,44 +58,48 @@ public class SyncService {
         return started.isPresent();
     }
 
-    /** True while a sync of this source is in progress in this app instance. */
-    public boolean isRunning(long sourceId) {
-        return running.contains(sourceId);
+    /** True while a sync of this tenant's source is in progress in this app instance. */
+    public boolean isRunning(long tenantId, long sourceId) {
+        return running.contains(new RunKey(tenantId, sourceId));
     }
 
-    private Optional<Started> begin(SourceConnector connector) {
-        Tenant tenant = tenants.current();
-        Source source = sources.findOrCreate(tenant.id(), connector.kind(), connector.name(), connector.visibility());
-        if (!running.add(source.id())) {
+    private Optional<Started> begin(long tenantId, SourceConnector connector) {
+        if (!tenants.isActive(tenantId)) {
+            log.info("Sync of {} skipped: tenant {} is not active", connector.name(), tenantId);
+            return Optional.empty();
+        }
+        Source source = sources.findOrCreate(tenantId, connector.kind(), connector.name(), connector.visibility());
+        RunKey key = new RunKey(tenantId, source.id());
+        if (!running.add(key)) {
             log.info("Sync of source {} ({}) already running, skipping", source.id(), source.name());
             return Optional.empty();
         }
         try {
-            return Optional.of(new Started(connector, tenant, source, runs.start(tenant.id(), source.id())));
+            return Optional.of(new Started(connector, tenantId, source, runs.start(tenantId, source.id())));
         } catch (RuntimeException e) {
-            running.remove(source.id());
+            running.remove(key);
             throw e;
         }
     }
 
     private SyncRun complete(Started started) {
-        Tenant tenant = started.tenant();
+        long tenantId = started.tenantId();
         Source source = started.source();
         try {
             SyncRun finished;
             try {
-                SyncCounts counts = started.connector().sync(tenant.id(), source.id());
-                finished = runs.finish(tenant.id(), started.runId(), SyncRun.OK, counts, null);
+                SyncCounts counts = started.connector().sync(tenantId, source.id());
+                finished = runs.finish(tenantId, started.runId(), SyncRun.OK, counts, null);
             } catch (Exception e) {
                 String error = describe(e);
                 log.warn("Sync of source {} ({}) failed: {}", source.id(), source.name(), error);
-                finished = runs.finish(tenant.id(), started.runId(), SyncRun.FAILED, SyncCounts.NONE, error);
+                finished = runs.finish(tenantId, started.runId(), SyncRun.FAILED, SyncCounts.NONE, error);
             }
             log.info("Sync of source {} ({}) finished {}: {}", source.id(), source.name(), finished.status(),
                     finished.counts());
             return finished;
         } finally {
-            running.remove(source.id());
+            running.remove(new RunKey(tenantId, source.id()));
         }
     }
 

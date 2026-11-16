@@ -64,7 +64,7 @@ class LinearSyncTest extends IntegrationTest {
     void setUp() {
         linear = new FakeLinearClient();
         connection = new LinearConnection(new TokenCipher(DriveTestSetup.ENCRYPTION_KEY), sources, credentials, store);
-        connector = new LinearConnector(linear, connection, store, runs, tenants);
+        connector = new LinearConnector(linear, connection, store, runs);
         connection.connect(tenant.id(), "Acme", FakeLinearClient.GOOD_KEY);
         connection.setTeams(tenant.id(), List.of(ENG));
     }
@@ -140,7 +140,7 @@ class LinearSyncTest extends IntegrationTest {
         sync();
         linear.readFailure = new SourceAccessException(HttpLinearClient.REJECTED);
 
-        SyncRun run = syncService.run(connector).orElseThrow();
+        SyncRun run = syncService.run(tenant.id(), connector).orElseThrow();
 
         assertThat(run.status()).isEqualTo(SyncRun.FAILED);
         assertThat(run.error()).isEqualTo("Linear rejected the API key. Reconnect Linear on the Sources page.");
@@ -153,7 +153,7 @@ class LinearSyncTest extends IntegrationTest {
         sync();
         linear.readFailure = new IOException("Linear is limiting how fast docs0 can read. Try again in a few minutes.");
 
-        SyncRun run = syncService.run(connector).orElseThrow();
+        SyncRun run = syncService.run(tenant.id(), connector).orElseThrow();
 
         assertThat(run.status()).isEqualTo(SyncRun.FAILED);
         assertThat(run.error()).contains("limiting how fast");
@@ -168,12 +168,12 @@ class LinearSyncTest extends IntegrationTest {
         int calls = linear.keysSeen.size();
         connection.setTeams(tenant.id(), List.of());
 
-        assertThat(connector.configured()).isTrue(); // documents remain to be cleared
+        assertThat(connector.configured(tenant.id())).isTrue(); // documents remain to be cleared
         assertThat(sync()).isEqualTo(new SyncCounts(0, 0, 2, 0, 0));
 
         assertThat(linear.keysSeen).hasSize(calls);
         assertThat(store.count(tenant.id(), sourceId())).isZero();
-        assertThat(connector.configured()).isFalse();
+        assertThat(connector.configured(tenant.id())).isFalse();
         assertThat(sync()).isEqualTo(SyncCounts.NONE);
     }
 
@@ -195,7 +195,7 @@ class LinearSyncTest extends IntegrationTest {
         assertThat(connection.credential(tenant.id())).isEmpty();
         assertThat(store.count(tenant.id(), sourceId())).isZero();
         assertThat(connection.teams(tenant.id())).containsExactly(ENG);
-        assertThat(connector.configured()).isFalse();
+        assertThat(connector.configured(tenant.id())).isFalse();
         assertThat(search.search(tenant.id(), ANYONE, "first", 5).hits()).isEmpty();
     }
 
@@ -211,27 +211,27 @@ class LinearSyncTest extends IntegrationTest {
 
     @Test
     void statusSaysWhatIsMissingWhatFailedAndHowMuchIsIndexed() throws Exception {
-        LinearConnector fresh = new LinearConnector(linear, connection, store, runs, tenants);
+        LinearConnector fresh = new LinearConnector(linear, connection, store, runs);
         connection.disconnect(tenant.id());
-        assertThat(fresh.status()).isEqualTo(
+        assertThat(fresh.status(tenant.id())).isEqualTo(
                 ComponentStatus.off("Linear", "not connected — connect it on the Sources page"));
 
         connection.connect(tenant.id(), "Acme", FakeLinearClient.GOOD_KEY);
         connection.setTeams(tenant.id(), List.of());
-        assertThat(fresh.status()).isEqualTo(ComponentStatus.off("Linear", "connected, nothing chosen yet"));
+        assertThat(fresh.status(tenant.id())).isEqualTo(ComponentStatus.off("Linear", "connected, nothing chosen yet"));
 
         connection.setTeams(tenant.id(), List.of(ENG));
-        assertThat(fresh.status().state()).isEqualTo(State.UP);
-        assertThat(fresh.status().detail()).contains("waiting for first sync");
+        assertThat(fresh.status(tenant.id()).state()).isEqualTo(State.UP);
+        assertThat(fresh.status(tenant.id()).detail()).contains("waiting for first sync");
 
         linear.issuesByTeam.put("team-eng", List.of(FakeLinearClient.issue("i1", "ENG-1", "First", T0)));
-        syncService.run(connector);
-        assertThat(fresh.status().state()).isEqualTo(State.UP);
-        assertThat(fresh.status().detail()).startsWith("1 documents, last sync ");
+        syncService.run(tenant.id(), connector);
+        assertThat(fresh.status(tenant.id()).state()).isEqualTo(State.UP);
+        assertThat(fresh.status(tenant.id()).detail()).startsWith("1 documents, last sync ");
 
         linear.readFailure = new SourceAccessException(HttpLinearClient.REJECTED);
-        syncService.run(connector);
-        ComponentStatus down = fresh.status();
+        syncService.run(tenant.id(), connector);
+        ComponentStatus down = fresh.status(tenant.id());
         assertThat(down.state()).isEqualTo(State.DOWN);
         assertThat(down.detail()).startsWith("last sync failed: Linear rejected the API key");
     }

@@ -10,7 +10,6 @@ import com.docs0.source.SyncRunRepository;
 import com.docs0.source.linear.LinearClient.Doc;
 import com.docs0.source.linear.LinearClient.Issue;
 import com.docs0.source.linear.LinearClient.Project;
-import com.docs0.tenant.TenantService;
 import com.docs0.web.StatusContributor;
 import java.io.IOException;
 import java.time.Instant;
@@ -41,15 +40,13 @@ public class LinearConnector implements SourceConnector, StatusContributor {
     private final LinearConnection connection;
     private final DocumentStore documents;
     private final SyncRunRepository runs;
-    private final TenantService tenants;
 
     public LinearConnector(LinearClient client, LinearConnection connection, DocumentStore documents,
-                           SyncRunRepository runs, TenantService tenants) {
+                           SyncRunRepository runs) {
         this.client = client;
         this.connection = connection;
         this.documents = documents;
         this.runs = runs;
-        this.tenants = tenants;
     }
 
     @Override
@@ -69,8 +66,7 @@ public class LinearConnector implements SourceConnector, StatusContributor {
 
     /** True when Linear is connected and either teams are chosen or documents remain from an earlier choice. */
     @Override
-    public boolean configured() {
-        long tenantId = tenants.current().id();
+    public boolean configured(long tenantId) {
         Optional<Source> source = connection.source(tenantId);
         if (source.isEmpty() || connection.credential(tenantId).isEmpty()) {
             return false;
@@ -158,8 +154,7 @@ public class LinearConnector implements SourceConnector, StatusContributor {
 
     /** Reads only the database; never calls Linear. */
     @Override
-    public ComponentStatus status() {
-        long tenantId = tenants.current().id();
+    public ComponentStatus status(long tenantId) {
         Optional<com.docs0.source.SourceCredential> credential = connection.credential(tenantId);
         if (credential.isEmpty()) {
             return ComponentStatus.off(NAME, "not connected — connect it on the Sources page");

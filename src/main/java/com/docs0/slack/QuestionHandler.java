@@ -55,6 +55,8 @@ public class QuestionHandler {
             "This month's docs0 budget is used up, so I can't answer new questions until next month. Please ask your docs0 admin if you need more.";
     static final String NO_SOURCES =
             "No sources are synced yet, so I have nothing to search. Please ask your docs0 admin to connect one.";
+    static final String SUSPENDED =
+            "docs0 is paused for your workspace, so I can't answer questions right now. Please ask your docs0 admin.";
     static final String APOLOGY = "Sorry, something went wrong while I was working on that. Please try asking again.";
 
     static final Duration STATUS_INTERVAL = Duration.ofSeconds(1);
@@ -66,13 +68,14 @@ public class QuestionHandler {
     private static final int DEDUPE_CAPACITY = 5000;
     private static final CompletableFuture<Void> DONE = CompletableFuture.completedFuture(null);
 
+    /** Only asks whether a tenant is active: which tenant an event belongs to is decided by the caller. */
     private final TenantService tenants;
     private final Agent agent;
     private final KnowledgeSearch knowledge;
     private final BudgetService budget;
     private final ConversationRepository conversations;
     private final InteractionRepository interactions;
-    private final SlackMessenger messenger;
+    private final SlackMessengers messengers;
     private final CorrectionFlow corrections;
     private final PendingActionRepository pendingActions;
     private final IdentityService identities;
@@ -98,32 +101,32 @@ public class QuestionHandler {
 
     @Autowired
     public QuestionHandler(TenantService tenants, Agent agent, KnowledgeSearch knowledge, BudgetService budget,
-            ConversationRepository conversations, InteractionRepository interactions, SlackMessenger messenger,
+            ConversationRepository conversations, InteractionRepository interactions, SlackMessengers messengers,
             CorrectionFlow corrections, PendingActionRepository pendingActions, IdentityService identities,
             ProactiveResponder proactive, StaleDocs staleDocs, UsageLog usage) {
-        this(tenants, agent, knowledge, budget, conversations, interactions, messenger, corrections, pendingActions,
+        this(tenants, agent, knowledge, budget, conversations, interactions, messengers, corrections, pendingActions,
                 identities, proactive, staleDocs, usage, STATUS_INTERVAL);
     }
 
     /** Without unprompted answers and stale-document notes. */
     public QuestionHandler(TenantService tenants, Agent agent, KnowledgeSearch knowledge, BudgetService budget,
-            ConversationRepository conversations, InteractionRepository interactions, SlackMessenger messenger,
+            ConversationRepository conversations, InteractionRepository interactions, SlackMessengers messengers,
             CorrectionFlow corrections, PendingActionRepository pendingActions, IdentityService identities) {
-        this(tenants, agent, knowledge, budget, conversations, interactions, messenger, corrections, pendingActions,
+        this(tenants, agent, knowledge, budget, conversations, interactions, messengers, corrections, pendingActions,
                 identities, null, null, null, STATUS_INTERVAL);
     }
 
     /** For tests: {@code statusInterval} is the minimum time between two status line updates. */
     QuestionHandler(TenantService tenants, Agent agent, KnowledgeSearch knowledge, BudgetService budget,
-            ConversationRepository conversations, InteractionRepository interactions, SlackMessenger messenger,
+            ConversationRepository conversations, InteractionRepository interactions, SlackMessengers messengers,
             CorrectionFlow corrections, PendingActionRepository pendingActions, IdentityService identities,
             Duration statusInterval) {
-        this(tenants, agent, knowledge, budget, conversations, interactions, messenger, corrections, pendingActions,
+        this(tenants, agent, knowledge, budget, conversations, interactions, messengers, corrections, pendingActions,
                 identities, null, null, null, statusInterval);
     }
 
     QuestionHandler(TenantService tenants, Agent agent, KnowledgeSearch knowledge, BudgetService budget,
-            ConversationRepository conversations, InteractionRepository interactions, SlackMessenger messenger,
+            ConversationRepository conversations, InteractionRepository interactions, SlackMessengers messengers,
             CorrectionFlow corrections, PendingActionRepository pendingActions, IdentityService identities,
             ProactiveResponder proactive, StaleDocs staleDocs, UsageLog usage, Duration statusInterval) {
         this.tenants = tenants;
@@ -132,7 +135,7 @@ public class QuestionHandler {
         this.budget = budget;
         this.conversations = conversations;
         this.interactions = interactions;
-        this.messenger = messenger;
+        this.messengers = messengers;
         this.corrections = corrections;
         this.pendingActions = pendingActions;
         this.identities = identities;
@@ -156,37 +159,36 @@ public class QuestionHandler {
      * thread. The returned future completes when the event has been fully processed
      * (answered or ignored); it never completes exceptionally.
      */
-    public CompletableFuture<Void> handle(IncomingEvent event) {
+    public CompletableFuture<Void> handle(long tenantId, IncomingEvent event) {
         if (event == null || event.fromBot() || event.subtype() != null || event.kind() == null
                 || isBlank(event.channel()) || isBlank(event.user()) || isBlank(event.ts())) {
             return DONE;
         }
-        String botUserId = botUserId();
+        String botUserId = botUserId(tenantId);
         if (event.user().equals(botUserId)) {
             return DONE;
         }
         if (event.kind() == IncomingEvent.Kind.CHANNEL_MESSAGE) {
-            return handleChannelMessage(event, botUserId);
+            return handleChannelMessage(tenantId, event, botUserId);
         }
         boolean dm = event.kind() == IncomingEvent.Kind.DIRECT_MESSAGE;
         boolean threadReply = event.kind() == IncomingEvent.Kind.THREAD_REPLY;
         if (threadReply && isBlank(event.threadTs())) {
             return DONE;
         }
-        if (event.eventId() != null && !seen.add("event:" + event.eventId())) {
+        if (event.eventId() != null && !seen.add(key(tenantId, "event:" + event.eventId()))) {
             return DONE;
         }
         // Channel: always the thread of the triggering message. DM: unthreaded unless written in a thread.
         String replyThreadTs = !isBlank(event.threadTs()) ? event.threadTs() : (dm ? null : event.ts());
         String conversationThreadTs = replyThreadTs == null ? "" : replyThreadTs;
 
-        return enqueue(event.channel(), conversationThreadTs, () -> {
-            long tenantId = tenants.current().id();
+        return enqueue(tenantId, event.channel(), conversationThreadTs, () -> {
             if (threadReply && !conversations.hasInteractions(tenantId, event.channel(), event.threadTs())) {
                 return;
             }
             // An app_mention and the message event for the same message must give one answer.
-            if (!seen.add("message:" + event.channel() + ":" + event.ts())) {
+            if (!seen.add(key(tenantId, "message:" + event.channel() + ":" + event.ts()))) {
                 return;
             }
             String text = stripMention(event.text(), botUserId, event.kind() == IncomingEvent.Kind.MENTION);
@@ -204,8 +206,8 @@ public class QuestionHandler {
      * the channel is opted in; then docs0 may recognise it as a repeat and answer in its thread. Mentions are
      * left to the mention event, so a mentioned message is never answered twice.
      */
-    private CompletableFuture<Void> handleChannelMessage(IncomingEvent event, String botUserId) {
-        if (proactive == null || !isBlank(event.threadTs()) || isDmChannel(event.channel())
+    private CompletableFuture<Void> handleChannelMessage(long tenantId, IncomingEvent event, String botUserId) {
+        if (proactive == null || !tenants.isActive(tenantId) || !isBlank(event.threadTs()) || isDmChannel(event.channel())
                 || isBlank(botUserId) || event.text() == null || event.text().contains("<@" + botUserId)) {
             return DONE;
         }
@@ -213,12 +215,11 @@ public class QuestionHandler {
         if (!ProactiveResponder.looksLikeQuestion(text)) {
             return DONE;
         }
-        if (event.eventId() != null && !seen.add("event:" + event.eventId())) {
+        if (event.eventId() != null && !seen.add(key(tenantId, "event:" + event.eventId()))) {
             return DONE;
         }
-        return enqueue(event.channel(), event.ts(), () -> {
-            long tenantId = tenants.current().id();
-            if (!seen.add("message:" + event.channel() + ":" + event.ts())) {
+        return enqueue(tenantId, event.channel(), event.ts(), () -> {
+            if (!seen.add(key(tenantId, "message:" + event.channel() + ":" + event.ts()))) {
                 return;
             }
             if (!agent.available()) {
@@ -237,12 +238,12 @@ public class QuestionHandler {
      * @param threadTs the thread of the clicked message, or null for an unthreaded DM
      * @param actionKey unique per click, to drop duplicate deliveries; may be null
      */
-    public CompletableFuture<Void> followUp(String channel, String threadTs, String user, String question,
-            String actionKey) {
+    public CompletableFuture<Void> followUp(long tenantId, String channel, String threadTs, String user,
+            String question, String actionKey) {
         if (isBlank(channel) || isBlank(user) || isBlank(question)) {
             return DONE;
         }
-        if (actionKey != null && !seen.add("action:" + actionKey)) {
+        if (actionKey != null && !seen.add(key(tenantId, "action:" + actionKey))) {
             return DONE;
         }
         String replyThreadTs = isBlank(threadTs) ? null : threadTs;
@@ -250,9 +251,8 @@ public class QuestionHandler {
         boolean dm = isDmChannel(channel);
         String text = question.strip();
 
-        return enqueue(channel, conversationThreadTs, () -> {
-            long tenantId = tenants.current().id();
-            messenger.postMessage(channel, replyThreadTs,
+        return enqueue(tenantId, channel, conversationThreadTs, () -> {
+            messenger(tenantId).postMessage(channel, replyThreadTs,
                     "*<@" + user + "> asked:* " + AnswerRenderer.escape(text), null);
             answer(tenantId, new Question(channel, replyThreadTs, conversationThreadTs, dm, user, text));
         });
@@ -286,11 +286,11 @@ public class QuestionHandler {
         } catch (Exception e) {
             log.warn("Question could not be checked: tenant={} channel={} error={}", tenantId, q.channel(),
                     e.getClass().getName());
-            messenger.postMessage(q.channel(), q.replyThreadTs(), APOLOGY, null);
+            messenger(tenantId).postMessage(q.channel(), q.replyThreadTs(), APOLOGY, null);
             return;
         }
         if (refusal != null) {
-            String ts = messenger.postMessage(q.channel(), q.replyThreadTs(), refusal, null);
+            String ts = messenger(tenantId).postMessage(q.channel(), q.replyThreadTs(), refusal, null);
             if (refusal.equals(OVER_BUDGET)) {
                 Conversation conversation = conversation(tenantId, q);
                 interactions.insertOverBudget(tenantId, conversation.id(), q.user(), q.text(), OVER_BUDGET, ts);
@@ -299,8 +299,8 @@ public class QuestionHandler {
             return;
         }
 
-        String statusTs = messenger.postMessage(q.channel(), q.replyThreadTs(), STATUS_SEARCHING, null);
-        StatusThrottle status = new StatusThrottle(text -> updateStatus(q.channel(), statusTs, text),
+        String statusTs = messenger(tenantId).postMessage(q.channel(), q.replyThreadTs(), STATUS_SEARCHING, null);
+        StatusThrottle status = new StatusThrottle(text -> updateStatus(tenantId, q.channel(), statusTs, text),
                 statusIntervalMillis, () -> System.nanoTime() / 1_000_000, this::schedule);
         long startedAt = System.nanoTime();
         Conversation conversation = null;
@@ -323,7 +323,7 @@ public class QuestionHandler {
         }
 
         List<StaleDocs.Stale> stale = staleOf(tenantId, result);
-        result = writeFinalMessage(q.channel(), statusTs, result, StaleDocs.oldest(stale));
+        result = writeFinalMessage(tenantId, q.channel(), statusTs, result, StaleDocs.oldest(stale));
 
         if (conversation == null) {
             log.warn("Interaction not logged, no conversation: tenant={} channel={}", tenantId, q.channel());
@@ -375,10 +375,10 @@ public class QuestionHandler {
                     StaleDocs.oldest(stale));
             String ts;
             try {
-                ts = messenger.postMessage(q.channel(), q.replyThreadTs(), rendered.text(), rendered.blocks());
+                ts = messenger(tenantId).postMessage(q.channel(), q.replyThreadTs(), rendered.text(), rendered.blocks());
             } catch (Exception e) {
                 log.warn("Answer layout rejected, sending plain text: channel={} error={}", q.channel(), reason(e));
-                ts = messenger.postMessage(q.channel(), q.replyThreadTs(), rendered.text(), null);
+                ts = messenger(tenantId).postMessage(q.channel(), q.replyThreadTs(), rendered.text(), null);
             }
             shown = true;
             Conversation conversation = conversation(tenantId, q);
@@ -463,7 +463,7 @@ public class QuestionHandler {
         for (PendingAction draft : result.drafts()) {
             try {
                 AnswerRenderer.Rendered rendered = AnswerRenderer.renderDraft(draft);
-                messenger.postMessage(q.channel(), q.replyThreadTs(), rendered.text(), rendered.blocks());
+                messenger(tenantId).postMessage(q.channel(), q.replyThreadTs(), rendered.text(), rendered.blocks());
             } catch (RuntimeException e) {
                 log.warn("Draft could not be shown: tenant={} draft={} error={}", tenantId, draft.id(), reason(e));
                 pendingActions.discard(tenantId, draft.id());
@@ -486,6 +486,9 @@ public class QuestionHandler {
 
     /** The reply to send instead of answering, or null when the question can go to the agent. */
     private String refusal(long tenantId, Question q) {
+        if (!tenants.isActive(tenantId)) {
+            return SUSPENDED;
+        }
         if (q.text().isEmpty()) {
             return HINT;
         }
@@ -505,16 +508,16 @@ public class QuestionHandler {
      * Replaces the status message with the answer, or with an apology when answering failed.
      * Returns the result to log: unchanged, or an error if the answer could not be shown.
      */
-    private AgentResult writeFinalMessage(String channel, String statusTs, AgentResult result, Instant staleSince) {
+    private AgentResult writeFinalMessage(long tenantId, String channel, String statusTs, AgentResult result, Instant staleSince) {
         if (result.kind() != Kind.ERROR) {
             try {
                 AnswerRenderer.Rendered rendered = AnswerRenderer.render(result, null, staleSince);
                 try {
-                    messenger.updateMessage(channel, statusTs, rendered.text(), rendered.blocks());
+                    messenger(tenantId).updateMessage(channel, statusTs, rendered.text(), rendered.blocks());
                 } catch (Exception e) {
                     // Slack rejected the layout: show the answer as plain text rather than lose it.
                     log.warn("Answer layout rejected, sending plain text: channel={} error={}", channel, reason(e));
-                    messenger.updateMessage(channel, statusTs, rendered.text(), null);
+                    messenger(tenantId).updateMessage(channel, statusTs, rendered.text(), null);
                 }
                 return result;
             } catch (Exception e) {
@@ -526,17 +529,17 @@ public class QuestionHandler {
             }
         }
         try {
-            messenger.updateMessage(channel, statusTs, APOLOGY, null);
+            messenger(tenantId).updateMessage(channel, statusTs, APOLOGY, null);
         } catch (Exception e) {
             log.warn("Apology could not be shown: channel={} error={}", channel, reason(e));
         }
         return result;
     }
 
-    private void updateStatus(String channel, String statusTs, String text) {
+    private void updateStatus(long tenantId, String channel, String statusTs, String text) {
         try {
             String line = text.strip();
-            messenger.updateMessage(channel, statusTs,
+            messenger(tenantId).updateMessage(channel, statusTs,
                     line.length() <= MAX_STATUS_CHARS ? line : line.substring(0, MAX_STATUS_CHARS - 1) + "…", null);
         } catch (Exception e) {
             log.debug("Status update failed: channel={} error={}", channel, reason(e));
@@ -558,7 +561,7 @@ public class QuestionHandler {
             return new Audience(Set.of(asker(tenantId, q.user())));
         }
         try {
-            Set<String> ids = messenger.channelMembers(q.channel());
+            Set<String> ids = messenger(tenantId).channelMembers(q.channel());
             if (ids != null && !ids.isEmpty()) {
                 Audience audience = people(tenantId, ids);
                 if (audience.members().size() < 2) {
@@ -578,7 +581,7 @@ public class QuestionHandler {
     }
 
     private Audience people(long tenantId, Set<String> ids) {
-        String own = botUserId();
+        String own = botUserId(tenantId);
         Set<String> humans = new java.util.LinkedHashSet<>();
         for (String id : ids) {
             if (id != null && !id.isBlank() && !id.equals(own)) {
@@ -617,8 +620,9 @@ public class QuestionHandler {
     // ---- plumbing --------------------------------------------------------------------------
 
     /** Runs the task after every earlier task of the same conversation has finished. */
-    private CompletableFuture<Void> enqueue(String channel, String conversationThreadTs, Runnable task) {
-        String key = channel + ":" + conversationThreadTs;
+    private CompletableFuture<Void> enqueue(long tenantId, String channel, String conversationThreadTs, Runnable task) {
+        // Slack ids are only unique within a workspace, so the tenant is part of every key.
+        String key = key(tenantId, channel + ":" + conversationThreadTs);
         CompletableFuture<Void> queued = queues.compute(key, (k, tail) -> {
             CompletableFuture<Void> previous = tail == null ? DONE : tail;
             return previous.handleAsync((ok, failed) -> {
@@ -645,9 +649,18 @@ public class QuestionHandler {
         return () -> scheduled.cancel(false);
     }
 
-    private String botUserId() {
+    private SlackMessenger messenger(long tenantId) {
+        return messengers.forTenant(tenantId);
+    }
+
+    /** A de-duplication or queue key that two tenants can never share, whatever Slack ids they have in common. */
+    private static String key(long tenantId, String id) {
+        return tenantId + "|" + id;
+    }
+
+    private String botUserId(long tenantId) {
         try {
-            return messenger.botUserId();
+            return messenger(tenantId).botUserId();
         } catch (Exception e) {
             return null;
         }

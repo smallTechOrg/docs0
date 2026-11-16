@@ -239,8 +239,8 @@ class SourcesPageTest extends IntegrationTest {
         String html = follow(callback);
         assertThat(html).contains("Connected as asha@example.com. Now choose the folders to index.")
                 .contains("Connected as <b>asha@example.com</b>").contains("No folders chosen yet");
-        assertThat(connector.status().state()).isEqualTo(State.OFF);
-        assertThat(connector.status().detail()).isEqualTo("connected as asha@example.com, no folders chosen yet");
+        assertThat(connector.status(tenant.id()).state()).isEqualTo(State.OFF);
+        assertThat(connector.status(tenant.id()).detail()).isEqualTo("connected as asha@example.com, no folders chosen yet");
     }
 
     @Test
@@ -495,16 +495,16 @@ class SourcesPageTest extends IntegrationTest {
         connect();
         connection.addFolder(tenant.id(), new Folder(FakeDriveClient.MAIN, "Main"));
         for (int i = 0; i < 6; i++) {
-            syncService.run(connector);
+            syncService.run(tenant.id(), connector);
         }
         drive.revoked = true;
-        syncService.run(connector);
+        syncService.run(tenant.id(), connector);
 
         String sync = section(page("/admin/sources"), "sync");
 
         assertThat(sync.split("class=\"state ", -1).length - 1).isEqualTo(5);
         assertThat(sync).contains(">Failed<").contains(RECONNECT).contains(">Complete<");
-        assertThat(connector.status().state()).isEqualTo(State.DOWN);
+        assertThat(connector.status(tenant.id()).state()).isEqualTo(State.DOWN);
     }
 
     // --- disconnect -----------------------------------------------------------------------
@@ -514,7 +514,7 @@ class SourcesPageTest extends IntegrationTest {
         connect();
         connection.addFolder(tenant.id(), new Folder(FakeDriveClient.MAIN, "Main"));
         drive.put("a", "Alpha", "text/plain", T0, "alpha okapi");
-        syncService.run(connector);
+        syncService.run(tenant.id(), connector);
         assertThat(search.count(tenant.id())).isEqualTo(1);
 
         // The button on the page only leads to the question.
@@ -532,7 +532,7 @@ class SourcesPageTest extends IntegrationTest {
         assertThat(search.count(tenant.id())).isZero();
         assertThat(search.search(tenant.id(), Audience.sharedOnly(), "okapi", 8).hits()).isEmpty();
         assertThat(follow(gone)).contains("Google Drive disconnected.").contains("id=\"not-connected\"");
-        assertThat(connector.status().detail()).isEqualTo("not connected — connect it on the Sources page");
+        assertThat(connector.status(tenant.id()).detail()).isEqualTo("not connected — connect it on the Sources page");
     }
 
     // --- helpers --------------------------------------------------------------------------
@@ -612,6 +612,6 @@ class SourcesPageTest extends IntegrationTest {
 
     private void awaitSyncDone() {
         await().atMost(15, TimeUnit.SECONDS).until(() -> connection.source(tenant.id())
-                .map(s -> !syncService.isRunning(s.id())).orElse(true));
+                .map(s -> !syncService.isRunning(tenant.id(), s.id())).orElse(true));
     }
 }

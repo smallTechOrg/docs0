@@ -1,9 +1,9 @@
 package com.docs0.web.admin;
 
-import com.docs0.config.Docs0Properties;
 import com.docs0.knowledge.DocumentStore;
 import com.docs0.slack.IdentityService;
 import com.docs0.slack.SlackMessenger;
+import com.docs0.slack.SlackMessengers;
 import com.docs0.slack.SlackMessenger.ChannelInfo;
 import com.docs0.source.Source;
 import com.docs0.source.SyncRun;
@@ -39,7 +39,7 @@ public class SlackHistoryPanel {
     public record ChannelRow(String id, String name, boolean isPrivate, boolean chosen, String note) {}
 
     /**
-     * The section. {@code state} is {@code off} (no bot token) or {@code connected}. {@code channels}
+     * The section. {@code state} is {@code off} (no Slack workspace) or {@code connected}. {@code channels}
      * is null when Slack could not be asked; see {@code error}.
      */
     public record Panel(String state, String error, boolean syncRunning, long documents, List<ChannelRow> channels,
@@ -51,8 +51,7 @@ public class SlackHistoryPanel {
 
     private record Cached(List<ChannelInfo> channels, Instant at) {}
 
-    private final Docs0Properties props;
-    private final SlackMessenger messenger;
+    private final SlackMessengers messengers;
     private final IdentityService identities;
     private final SlackHistoryConnection connection;
     private final SlackHistoryConnector connector;
@@ -61,11 +60,10 @@ public class SlackHistoryPanel {
     private final DocumentStore documents;
     private final Map<Long, Cached> cache = new ConcurrentHashMap<>();
 
-    public SlackHistoryPanel(Docs0Properties props, SlackMessenger messenger, IdentityService identities,
+    public SlackHistoryPanel(SlackMessengers messengers, IdentityService identities,
                              SlackHistoryConnection connection, SlackHistoryConnector connector,
                              SyncService syncService, SyncRunRepository runs, DocumentStore documents) {
-        this.props = props;
-        this.messenger = messenger;
+        this.messengers = messengers;
         this.identities = identities;
         this.connection = connection;
         this.connector = connector;
@@ -74,8 +72,9 @@ public class SlackHistoryPanel {
         this.documents = documents;
     }
 
-    public boolean botTokenSet() {
-        return props.slack() != null && props.slack().botToken() != null && !props.slack().botToken().isBlank();
+    /** True when the tenant has a Slack workspace connected. */
+    public boolean workspaceConnected(long tenantId) {
+        return messengers.connected(tenantId);
     }
 
     public void addTo(Model model, long tenantId) {
@@ -88,7 +87,7 @@ public class SlackHistoryPanel {
         if (cached != null && cached.at().plus(KEEP).isAfter(Instant.now())) {
             return cached.channels();
         }
-        List<ChannelInfo> channels = messenger.listChannels();
+        List<ChannelInfo> channels = messengers.forTenant(tenantId).listChannels();
         cache.put(tenantId, new Cached(channels, Instant.now()));
         return channels;
     }
@@ -99,7 +98,7 @@ public class SlackHistoryPanel {
 
     private Panel panel(long tenantId) {
         Optional<Source> source = connection.source(tenantId);
-        boolean running = source.isPresent() && syncService.isRunning(source.get().id());
+        boolean running = source.isPresent() && syncService.isRunning(tenantId, source.get().id());
         List<SourcesController.RunRow> rows = new ArrayList<>();
         long count = 0;
         if (source.isPresent()) {
@@ -108,7 +107,7 @@ public class SlackHistoryPanel {
             }
             count = documents.count(tenantId, source.get().id());
         }
-        if (!botTokenSet()) {
+        if (!workspaceConnected(tenantId)) {
             return new Panel("off", null, false, 0, null, false, List.of());
         }
         List<ChannelRow> channels = null;
@@ -120,7 +119,7 @@ public class SlackHistoryPanel {
         }
         boolean emailWarning = false;
         try {
-            emailWarning = identities.emailScopeMissing();
+            emailWarning = identities.emailScopeMissing(tenantId);
         } catch (RuntimeException e) {
             // The warning is an extra; the page works without it.
         }
@@ -130,7 +129,7 @@ public class SlackHistoryPanel {
     private List<ChannelRow> rows(long tenantId, List<ChannelInfo> visible) {
         List<SlackChannel> chosen = connection.channels(tenantId);
         Set<String> chosenIds = chosen.stream().map(SlackChannel::id).collect(Collectors.toSet());
-        Map<String, String> skipped = connector.notes();
+        Map<String, String> skipped = connector.notes(tenantId);
         List<ChannelRow> rows = new ArrayList<>();
         Set<String> seen = new java.util.HashSet<>();
         for (ChannelInfo info : visible) {
@@ -153,6 +152,9 @@ public class SlackHistoryPanel {
 
     static String describe(RuntimeException e) {
         if (e instanceof SlackMessenger.SlackCallException slack) {
+            if ("no_workspace".equals(slack.code())) {
+                return "Slack is not connected yet. Set DOCS0_SLACK_BOT_TOKEN and restart docs0 (see the README).";
+            }
             if ("missing_scope".equals(slack.code())) {
                 return "The Slack app is missing a permission needed to list channels. Re-paste slack/manifest.yml "
                         + "and reinstall the app (see the README).";

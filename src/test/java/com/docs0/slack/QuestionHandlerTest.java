@@ -59,7 +59,7 @@ class QuestionHandlerTest {
                 new Docs0Properties.Budget(monthlyBudget),
                 new Docs0Properties.Slack("", ""),
                 new Docs0Properties.Drive(15, false), null, "", "", "");
-        return new QuestionHandler(new TenantService(jdbc, props), agent, knowledge, new BudgetService(jdbc, props),
+        return new QuestionHandler(new TenantService(jdbc), agent, knowledge, new BudgetService(jdbc, props),
                 new ConversationRepository(jdbc), new InteractionRepository(jdbc), slack, correctionFlow(props),
                 new com.docs0.action.PendingActionRepository(jdbc), new IdentityService(jdbc, slack),
                 statusInterval);
@@ -75,7 +75,7 @@ class QuestionHandlerTest {
 
     @Test
     void mentionInChannelIsAnsweredInTheThreadOfThatMessage() throws Exception {
-        await(handler.handle(mention("<@UBOT> what is our pricing?", "100.1", null, "Ev1")));
+        await(handler.handle(tenantId, mention("<@UBOT> what is our pricing?", "100.1", null, "Ev1")));
 
         FakeMessenger.Posted status = slack.onlyPost();
         assertThat(status.channel()).isEqualTo(CHANNEL);
@@ -92,7 +92,7 @@ class QuestionHandlerTest {
 
     @Test
     void mentionInsideAnExistingThreadIsAnsweredInThatThread() throws Exception {
-        await(handler.handle(mention("<@UBOT> and for enterprise?", "100.7", "100.1", "Ev1")));
+        await(handler.handle(tenantId, mention("<@UBOT> and for enterprise?", "100.7", "100.1", "Ev1")));
 
         assertThat(slack.onlyPost().threadTs()).isEqualTo("100.1");
         assertThat(conversationRows()).singleElement()
@@ -101,8 +101,8 @@ class QuestionHandlerTest {
 
     @Test
     void directMessageIsAnsweredUnthreadedAndTheWholeDmIsOneConversationWithHistory() throws Exception {
-        await(handler.handle(dm("what is our pricing?", "200.1", null, "Ev1")));
-        await(handler.handle(dm("and for enterprise?", "200.2", null, "Ev2")));
+        await(handler.handle(tenantId, dm("what is our pricing?", "200.1", null, "Ev1")));
+        await(handler.handle(tenantId, dm("and for enterprise?", "200.2", null, "Ev2")));
 
         assertThat(slack.posts).hasSize(2).allSatisfy(p -> {
             assertThat(p.channel()).isEqualTo(DM);
@@ -121,7 +121,7 @@ class QuestionHandlerTest {
 
     @Test
     void directMessageWrittenInAThreadIsAnsweredInThatThread() throws Exception {
-        await(handler.handle(dm("what is our pricing?", "200.5", "200.1", "Ev1")));
+        await(handler.handle(tenantId, dm("what is our pricing?", "200.5", "200.1", "Ev1")));
 
         assertThat(slack.onlyPost().threadTs()).isEqualTo("200.1");
         assertThat(conversationRows()).singleElement().satisfies(row -> {
@@ -133,12 +133,12 @@ class QuestionHandlerTest {
 
     @Test
     void threadReplyWithoutMentionIsAnsweredOnlyAfterDocs0HasAnsweredInThatThread() throws Exception {
-        await(handler.handle(threadReply("anyone know the pricing?", "100.2", "100.1", "Ev1")));
+        await(handler.handle(tenantId, threadReply("anyone know the pricing?", "100.2", "100.1", "Ev1")));
         assertThat(slack.posts).isEmpty();
         assertThat(agent.requests).isEmpty();
 
-        await(handler.handle(mention("<@UBOT> what is our pricing?", "100.3", "100.1", "Ev2")));
-        await(handler.handle(threadReply("and for enterprise?", "100.4", "100.1", "Ev3")));
+        await(handler.handle(tenantId, mention("<@UBOT> what is our pricing?", "100.3", "100.1", "Ev2")));
+        await(handler.handle(tenantId, threadReply("and for enterprise?", "100.4", "100.1", "Ev3")));
 
         assertThat(agent.requests).extracting(Agent.AgentRequest::question)
                 .containsExactly("what is our pricing?", "and for enterprise?");
@@ -146,21 +146,21 @@ class QuestionHandlerTest {
         assertThat(agent.requests.get(1).history()).hasSize(1);
 
         // A reply in some other thread is still ignored.
-        await(handler.handle(threadReply("unrelated chatter", "300.2", "300.1", "Ev4")));
+        await(handler.handle(tenantId, threadReply("unrelated chatter", "300.2", "300.1", "Ev4")));
         assertThat(agent.requests).hasSize(2);
     }
 
     @Test
     void botMessagesSubtypesAndDocs0sOwnMessagesAreIgnored() throws Exception {
-        await(handler.handle(new IncomingEvent(IncomingEvent.Kind.DIRECT_MESSAGE, DM, "U9", "hello", "200.1", null,
+        await(handler.handle(tenantId, new IncomingEvent(IncomingEvent.Kind.DIRECT_MESSAGE, DM, "U9", "hello", "200.1", null,
                 "Ev1", null, true)));
-        await(handler.handle(new IncomingEvent(IncomingEvent.Kind.DIRECT_MESSAGE, DM, "U1", "edited", "200.2", null,
+        await(handler.handle(tenantId, new IncomingEvent(IncomingEvent.Kind.DIRECT_MESSAGE, DM, "U1", "edited", "200.2", null,
                 "Ev2", "message_changed", false)));
-        await(handler.handle(new IncomingEvent(IncomingEvent.Kind.MENTION, CHANNEL, "U1", "<@UBOT> joined", "100.1",
+        await(handler.handle(tenantId, new IncomingEvent(IncomingEvent.Kind.MENTION, CHANNEL, "U1", "<@UBOT> joined", "100.1",
                 null, "Ev3", "channel_join", false)));
-        await(handler.handle(new IncomingEvent(IncomingEvent.Kind.DIRECT_MESSAGE, DM, "UBOT", "my own answer",
+        await(handler.handle(tenantId, new IncomingEvent(IncomingEvent.Kind.DIRECT_MESSAGE, DM, "UBOT", "my own answer",
                 "200.3", null, "Ev4", null, false)));
-        await(handler.handle(null));
+        await(handler.handle(tenantId, null));
 
         assertThat(slack.posts).isEmpty();
         assertThat(agent.requests).isEmpty();
@@ -169,8 +169,8 @@ class QuestionHandlerTest {
 
     @Test
     void duplicateEventIdIsAnsweredOnce() throws Exception {
-        await(handler.handle(mention("<@UBOT> what is our pricing?", "100.1", null, "Ev1")));
-        await(handler.handle(mention("<@UBOT> what is our pricing?", "100.1", null, "Ev1")));
+        await(handler.handle(tenantId, mention("<@UBOT> what is our pricing?", "100.1", null, "Ev1")));
+        await(handler.handle(tenantId, mention("<@UBOT> what is our pricing?", "100.1", null, "Ev1")));
 
         assertThat(agent.requests).hasSize(1);
         assertThat(slack.posts).hasSize(1);
@@ -180,15 +180,15 @@ class QuestionHandlerTest {
     @Test
     void mentionAndMessageEventForTheSameMessageGiveOneAnswer() throws Exception {
         // First question in a thread: the message event arrives before the app_mention.
-        await(handler.handle(threadReply("<@UBOT> what is our pricing?", "100.2", "100.1", "Ev1")));
-        await(handler.handle(mention("<@UBOT> what is our pricing?", "100.2", "100.1", "Ev2")));
+        await(handler.handle(tenantId, threadReply("<@UBOT> what is our pricing?", "100.2", "100.1", "Ev1")));
+        await(handler.handle(tenantId, mention("<@UBOT> what is our pricing?", "100.2", "100.1", "Ev2")));
         assertThat(agent.requests).hasSize(1);
 
         // Thread already answered: both events qualify on their own, in either order.
-        await(handler.handle(mention("<@UBOT> and enterprise?", "100.3", "100.1", "Ev3")));
-        await(handler.handle(threadReply("<@UBOT> and enterprise?", "100.3", "100.1", "Ev4")));
-        await(handler.handle(threadReply("<@UBOT> and startups?", "100.4", "100.1", "Ev5")));
-        await(handler.handle(mention("<@UBOT> and startups?", "100.4", "100.1", "Ev6")));
+        await(handler.handle(tenantId, mention("<@UBOT> and enterprise?", "100.3", "100.1", "Ev3")));
+        await(handler.handle(tenantId, threadReply("<@UBOT> and enterprise?", "100.3", "100.1", "Ev4")));
+        await(handler.handle(tenantId, threadReply("<@UBOT> and startups?", "100.4", "100.1", "Ev5")));
+        await(handler.handle(tenantId, mention("<@UBOT> and startups?", "100.4", "100.1", "Ev6")));
 
         assertThat(agent.requests).extracting(Agent.AgentRequest::question)
                 .containsExactly("what is our pricing?", "and enterprise?", "and startups?");
@@ -198,7 +198,7 @@ class QuestionHandlerTest {
 
     @Test
     void emptyMentionGetsAOneLineHint() throws Exception {
-        await(handler.handle(mention("<@UBOT>  ", "100.1", null, "Ev1")));
+        await(handler.handle(tenantId, mention("<@UBOT>  ", "100.1", null, "Ev1")));
 
         FakeMessenger.Posted hint = slack.onlyPost();
         assertThat(hint.text()).isEqualTo(QuestionHandler.HINT).doesNotContain("\n");
@@ -213,7 +213,7 @@ class QuestionHandlerTest {
     void saysSoWhenTheAgentIsNotConnected() throws Exception {
         agent.available = false;
 
-        await(handler.handle(mention("<@UBOT> what is our pricing?", "100.1", null, "Ev1")));
+        await(handler.handle(tenantId, mention("<@UBOT> what is our pricing?", "100.1", null, "Ev1")));
 
         assertThat(slack.onlyPost().text()).isEqualTo(QuestionHandler.NOT_CONNECTED);
         assertThat(agent.requests).isEmpty();
@@ -225,10 +225,10 @@ class QuestionHandlerTest {
         handler = newHandler(Duration.ZERO, new BigDecimal("0.05"));
         agent.behaviour = (request, progress) -> new AgentResult(Kind.ANSWER, "It is $10.", Confidence.HIGH,
                 List.of(), List.of(), List.of(), 2, 1000, 200, new BigDecimal("0.05"), 900, null);
-        await(handler.handle(mention("<@UBOT> what is our pricing?", "100.1", null, "Ev1")));
+        await(handler.handle(tenantId, mention("<@UBOT> what is our pricing?", "100.1", null, "Ev1")));
         assertThat(agent.requests).hasSize(1);
 
-        await(handler.handle(mention("<@UBOT> and for enterprise?", "100.5", null, "Ev2")));
+        await(handler.handle(tenantId, mention("<@UBOT> and for enterprise?", "100.5", null, "Ev2")));
 
         assertThat(agent.requests).hasSize(1);
         FakeMessenger.Posted refusal = slack.posts.get(1);
@@ -246,7 +246,7 @@ class QuestionHandlerTest {
     void saysSoWhenNoSourcesAreSynced() throws Exception {
         knowledge.count = 0;
 
-        await(handler.handle(dm("what is our pricing?", "200.1", null, "Ev1")));
+        await(handler.handle(tenantId, dm("what is our pricing?", "200.1", null, "Ev1")));
 
         assertThat(slack.onlyPost().text()).isEqualTo(QuestionHandler.NO_SOURCES);
         assertThat(agent.requests).isEmpty();
@@ -265,7 +265,7 @@ class QuestionHandlerTest {
             return SlackFakes.result(Kind.ANSWER, "It is **$10** per seat.");
         };
 
-        await(handler.handle(mention("<@UBOT> what is our pricing?", "100.1", null, "Ev1")));
+        await(handler.handle(tenantId, mention("<@UBOT> what is our pricing?", "100.1", null, "Ev1")));
         // A straggling status after the answer must not overwrite it.
         kept.get().onStatus("Still searching…");
 
@@ -288,7 +288,7 @@ class QuestionHandlerTest {
             return SlackFakes.result(Kind.ANSWER, "It is $10.");
         };
 
-        await(handler.handle(mention("<@UBOT> what is our pricing?", "100.1", null, "Ev1")));
+        await(handler.handle(tenantId, mention("<@UBOT> what is our pricing?", "100.1", null, "Ev1")));
 
         assertThat(slack.updates).extracting(FakeMessenger.Updated::text).containsExactly("It is $10.");
     }
@@ -299,7 +299,7 @@ class QuestionHandlerTest {
     void agentErrorEndsInAnApologyAndALoggedInteraction() throws Exception {
         agent.behaviour = (request, progress) -> SlackFakes.result(Kind.ERROR, null);
 
-        await(handler.handle(mention("<@UBOT> what is our pricing?", "100.1", null, "Ev1")));
+        await(handler.handle(tenantId, mention("<@UBOT> what is our pricing?", "100.1", null, "Ev1")));
 
         FakeMessenger.Updated last = slack.lastUpdate();
         assertThat(last.ts()).isEqualTo(slack.onlyPost().ts());
@@ -318,7 +318,7 @@ class QuestionHandlerTest {
             throw new IllegalStateException("boom at com.docs0.internal");
         };
 
-        await(handler.handle(dm("what is our pricing?", "200.1", null, "Ev1")));
+        await(handler.handle(tenantId, dm("what is our pricing?", "200.1", null, "Ev1")));
 
         FakeMessenger.Updated last = slack.lastUpdate();
         assertThat(last.ts()).isEqualTo(slack.onlyPost().ts());
@@ -334,7 +334,7 @@ class QuestionHandlerTest {
     void answerIsSentAsPlainTextWhenSlackRejectsTheLayout() throws Exception {
         slack.rejectBlocks = true;
 
-        await(handler.handle(dm("what is our pricing?", "200.1", null, "Ev1")));
+        await(handler.handle(tenantId, dm("what is our pricing?", "200.1", null, "Ev1")));
 
         assertThat(slack.updates).singleElement().satisfies(u -> {
             assertThat(u.text()).isEqualTo("Answer to: what is our pricing?");
@@ -347,7 +347,7 @@ class QuestionHandlerTest {
     void anAnswerThatCannotBeShownIsLoggedAsAnError() throws Exception {
         slack.rejectAllUpdates = true;
 
-        await(handler.handle(dm("what is our pricing?", "200.1", null, "Ev1")));
+        await(handler.handle(tenantId, dm("what is our pricing?", "200.1", null, "Ev1")));
 
         assertThat(interactionRows()).singleElement().satisfies(row -> {
             assertThat(row).containsEntry("kind", "ERROR");
@@ -363,7 +363,7 @@ class QuestionHandlerTest {
                 ? SlackFakes.result(Kind.ERROR, null)
                 : SlackFakes.result(Kind.ANSWER, "a-" + request.question());
         for (int i = 1; i <= 13; i++) {
-            await(handler.handle(dm("q" + i, "200." + i, null, "Ev" + i)));
+            await(handler.handle(tenantId, dm("q" + i, "200." + i, null, "Ev" + i)));
         }
 
         List<Exchange> history = agent.requests.get(12).history();
@@ -379,7 +379,7 @@ class QuestionHandlerTest {
                 List.of(new Citation(1, 42, "Pricing 2026", "https://docs.example/pricing", "Seats cost $10.")),
                 List.of("And enterprise?"), List.of("Asha"), 4, 12345, 678, new BigDecimal("0.031470"), 2500, null);
 
-        await(handler.handle(mention("<@UBOT> what is our pricing?", "100.1", null, "Ev1")));
+        await(handler.handle(tenantId, mention("<@UBOT> what is our pricing?", "100.1", null, "Ev1")));
 
         Map<String, Object> row = interactionRows().get(0);
         assertThat(row).containsEntry("tenant_id", tenantId)
@@ -419,11 +419,11 @@ class QuestionHandlerTest {
             return SlackFakes.result(Kind.ANSWER, "a-" + request.question());
         };
 
-        CompletableFuture<Void> first = handler.handle(dm("first", "200.1", null, "Ev1"));
+        CompletableFuture<Void> first = handler.handle(tenantId, dm("first", "200.1", null, "Ev1"));
         assertThat(firstStarted.await(10, TimeUnit.SECONDS)).isTrue();
-        CompletableFuture<Void> second = handler.handle(dm("second", "200.2", null, "Ev2"));
+        CompletableFuture<Void> second = handler.handle(tenantId, dm("second", "200.2", null, "Ev2"));
         // A question in another conversation is not held up.
-        await(handler.handle(mention("<@UBOT> elsewhere", "100.1", null, "Ev3")));
+        await(handler.handle(tenantId, mention("<@UBOT> elsewhere", "100.1", null, "Ev3")));
         assertThatThrownBy(() -> second.get(150, TimeUnit.MILLISECONDS)).isInstanceOf(TimeoutException.class);
         assertThat(trace).containsExactly("start first", "start elsewhere", "end elsewhere");
 
@@ -440,7 +440,7 @@ class QuestionHandlerTest {
     void audienceIsTheChannelMembers() throws Exception {
         slack.members = java.util.Set.of("U1", "U2", "U3");
 
-        await(handler.handle(mention("<@UBOT> what is our pricing?", "100.1", null, "Ev1")));
+        await(handler.handle(tenantId, mention("<@UBOT> what is our pricing?", "100.1", null, "Ev1")));
 
         assertThat(agent.requests.get(0).audience()).isEqualTo(Audience.of("U1", "U2", "U3"));
         assertThat(agent.requests.get(0).tenantId()).isEqualTo(tenantId);
@@ -450,7 +450,7 @@ class QuestionHandlerTest {
     void audienceIsSharedOnlyWhenMemberLookupFails() throws Exception {
         slack.memberLookupFails = true;
 
-        await(handler.handle(mention("<@UBOT> what is our pricing?", "100.1", null, "Ev1")));
+        await(handler.handle(tenantId, mention("<@UBOT> what is our pricing?", "100.1", null, "Ev1")));
 
         assertThat(agent.requests.get(0).audience()).isEqualTo(Audience.sharedOnly());
         assertThat(slack.lastUpdate().text()).isEqualTo("Answer to: what is our pricing?");
@@ -460,10 +460,10 @@ class QuestionHandlerTest {
 
     @Test
     void followUpIsShownInTheThreadAndAnsweredThereForTheClicker() throws Exception {
-        await(handler.handle(mention("<@UBOT> what is our pricing?", "100.1", null, "Ev1")));
+        await(handler.handle(tenantId, mention("<@UBOT> what is our pricing?", "100.1", null, "Ev1")));
 
-        await(handler.followUp(CHANNEL, "100.1", "U7", "And <enterprise>?", "act-1"));
-        await(handler.followUp(CHANNEL, "100.1", "U7", "And <enterprise>?", "act-1"));
+        await(handler.followUp(tenantId, CHANNEL, "100.1", "U7", "And <enterprise>?", "act-1"));
+        await(handler.followUp(tenantId, CHANNEL, "100.1", "U7", "And <enterprise>?", "act-1"));
 
         assertThat(slack.posts).hasSize(3);
         assertThat(slack.posts.get(1).text()).isEqualTo("*<@U7> asked:* And &lt;enterprise&gt;?");
@@ -477,9 +477,9 @@ class QuestionHandlerTest {
 
     @Test
     void followUpInAnUnthreadedDmStaysUnthreadedInTheSameConversation() throws Exception {
-        await(handler.handle(dm("what is our pricing?", "200.1", null, "Ev1")));
+        await(handler.handle(tenantId, dm("what is our pricing?", "200.1", null, "Ev1")));
 
-        await(handler.followUp(DM, null, "U1", "And enterprise?", "act-1"));
+        await(handler.followUp(tenantId, DM, null, "U1", "And enterprise?", "act-1"));
 
         assertThat(slack.posts).hasSize(3).allSatisfy(p -> assertThat(p.threadTs()).isNull());
         assertThat(agent.requests.get(1).audience()).isEqualTo(Audience.of("U1"));

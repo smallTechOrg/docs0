@@ -56,7 +56,7 @@ class LiveGrainCheck extends IntegrationTest {
         GrainConnection connection = new GrainConnection(new TokenCipher(DriveTestSetup.ENCRYPTION_KEY), sources,
                 credentials, store);
         connection.connect(tenant.id(), account.name(), token);
-        GrainConnector connector = new GrainConnector(client, connection, store, runs, tenants, 14);
+        GrainConnector connector = new GrainConnector(client, connection, store, runs, 14);
 
         long sourceId = connection.source(tenant.id()).orElseThrow().id();
         SyncCounts counts = connector.sync(tenant.id(), sourceId);

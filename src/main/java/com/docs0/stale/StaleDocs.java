@@ -3,6 +3,7 @@ package com.docs0.stale;
 import com.docs0.agent.Agent.Citation;
 import com.docs0.slack.AnswerRenderer;
 import com.docs0.slack.SlackMessenger;
+import com.docs0.slack.SlackMessengers;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
@@ -45,12 +46,12 @@ public class StaleDocs {
     private static final Logger log = LoggerFactory.getLogger(StaleDocs.class);
 
     private final JdbcClient jdbc;
-    private final SlackMessenger messenger;
+    private final SlackMessengers messengers;
     private final int staleDays;
 
-    public StaleDocs(JdbcClient jdbc, SlackMessenger messenger, @Value("${docs0.stale.days:365}") int staleDays) {
+    public StaleDocs(JdbcClient jdbc, SlackMessengers messengers, @Value("${docs0.stale.days:365}") int staleDays) {
         this.jdbc = jdbc;
-        this.messenger = messenger;
+        this.messengers = messengers;
         this.staleDays = staleDays;
     }
 
@@ -98,7 +99,8 @@ public class StaleDocs {
             }
             jdbc.sql("""
                             INSERT INTO stale_flag (tenant_id, document_id, interaction_id, document_modified_at)
-                            SELECT i.tenant_id, :documentId, i.id, :modifiedAt FROM interaction i
+                            SELECT i.tenant_id, d.id, i.id, :modifiedAt FROM interaction i
+                            JOIN document d ON d.id = :documentId AND d.tenant_id = i.tenant_id
                             WHERE i.id = :interactionId AND i.tenant_id = :tenantId
                             ON CONFLICT (interaction_id, document_id) DO NOTHING
                             """)
@@ -161,6 +163,7 @@ public class StaleDocs {
             return PingResult.TOO_SOON;
         }
         try {
+            SlackMessenger messenger = messengers.forTenant(tenantId);
             Optional<String> slackUser = messenger.lookupByEmail(doc.ownerEmail().strip());
             if (slackUser.isEmpty()) {
                 return PingResult.NOT_IN_SLACK;

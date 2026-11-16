@@ -45,11 +45,11 @@ public class CostsController {
     }
 
     @GetMapping(PAGE)
-    public String page(Model model) {
-        long tenantId = tenants.current().id();
+    public String page(AdminPrincipal admin, Model model) {
+        long tenantId = admin.tenantId();
         BigDecimal spent = budget.spentThisMonth(tenantId);
         BigDecimal other = budget.otherSpentThisMonth(tenantId);
-        BigDecimal cap = budget.monthlyCap();
+        BigDecimal cap = budget.monthlyCap(admin.tenantId());
         int percent = cap == null ? 0
                 : spent.multiply(BigDecimal.valueOf(100)).divide(cap, 0, java.math.RoundingMode.DOWN)
                         .min(BigDecimal.valueOf(100)).intValue();
@@ -71,7 +71,7 @@ public class CostsController {
                 })
                 .toList();
 
-        model.addAttribute("tenantName", tenants.current().name());
+        model.addAttribute("tenantName", tenants.name(admin.tenantId()));
         model.addAttribute("spent", spent);
         model.addAttribute("otherSpent", other);
         model.addAttribute("questionSpent", spent.subtract(other));

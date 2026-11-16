@@ -73,7 +73,7 @@ class SlackHistoryPageTest extends IntegrationTest {
     @AfterEach
     void letSyncsFinish() {
         await().atMost(15, TimeUnit.SECONDS).until(() ->
-                connection.source(tenant.id()).map(s -> !syncService.isRunning(s.id())).orElse(true));
+                connection.source(tenant.id()).map(s -> !syncService.isRunning(tenant.id(), s.id())).orElse(true));
     }
 
     @Test
@@ -179,7 +179,7 @@ class SlackHistoryPageTest extends IntegrationTest {
         await().atMost(15, TimeUnit.SECONDS).until(() ->
                 !search.search(tenant.id(), Audience.sharedOnly(), "okapi launch", 5).hits().isEmpty());
         await().atMost(15, TimeUnit.SECONDS).until(() ->
-                connection.source(tenant.id()).map(s -> !syncService.isRunning(s.id())).orElse(false));
+                connection.source(tenant.id()).map(s -> !syncService.isRunning(tenant.id(), s.id())).orElse(false));
         String html = page("/admin/sources");
         assertThat(html).containsPattern("1</span>\\s*added").contains("Complete");
         assertThat(html).containsPattern("1\\s*</span>\\s*documents indexed");

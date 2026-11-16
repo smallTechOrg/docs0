@@ -54,13 +54,13 @@ class AudienceFromSlackTest {
         CorrectionFlow flow = new CorrectionFlow(new CorrectionDetector(llm, props), new ConversationRepository(jdbc),
                 new InteractionRepository(jdbc), new com.docs0.feedback.FeedbackRepository(jdbc),
                 new com.docs0.feedback.CorrectionRepository(jdbc), slack);
-        handler = new QuestionHandler(new TenantService(jdbc, props), agent, new FakeKnowledge(),
+        handler = new QuestionHandler(new TenantService(jdbc), agent, new FakeKnowledge(),
                 new BudgetService(jdbc, props), new ConversationRepository(jdbc), new InteractionRepository(jdbc), slack,
                 flow, new com.docs0.action.PendingActionRepository(jdbc), identities, Duration.ZERO);
     }
 
     private void ask(String channel, String user) throws Exception {
-        CompletableFuture<Void> work = handler.handle(IncomingEvent.of(
+        CompletableFuture<Void> work = handler.handle(tenantId, IncomingEvent.of(
                 channel.startsWith("D") ? IncomingEvent.Kind.DIRECT_MESSAGE : IncomingEvent.Kind.MENTION,
                 channel, user, "<@UBOT> what is the plan?", "100." + System.nanoTime() % 100000, null,
                 "Ev" + System.nanoTime()));
@@ -160,9 +160,9 @@ class AudienceFromSlackTest {
         ask(CHANNEL, "U1");
 
         assertThat(lastAudience()).isEqualTo(Audience.of("U1", "U2"));
-        assertThat(identities.emailScopeMissing()).isTrue();
+        assertThat(identities.emailScopeMissing(tenantId)).isTrue();
         slack.scopes = Set.of("users:read", "users:read.email");
-        assertThat(new IdentityService(jdbc, slack).emailScopeMissing()).isFalse();
+        assertThat(new IdentityService(jdbc, slack).emailScopeMissing(tenantId)).isFalse();
     }
 
     @Test
@@ -172,7 +172,7 @@ class AudienceFromSlackTest {
         IdentityService service = new IdentityService(jdbc, slack);
 
         assertThat(service.resolve(tenantId, Set.of("U1"), Duration.ofSeconds(5))).isEmpty();
-        assertThat(service.emailScopeMissing()).isTrue();
+        assertThat(service.emailScopeMissing(tenantId)).isTrue();
     }
 
     @Test

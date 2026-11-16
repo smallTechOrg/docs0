@@ -29,17 +29,17 @@ public class CorrectionFlow {
     private final InteractionRepository interactions;
     private final FeedbackRepository feedback;
     private final CorrectionRepository corrections;
-    private final SlackMessenger messenger;
+    private final SlackMessengers messengers;
 
     public CorrectionFlow(CorrectionDetector detector, ConversationRepository conversations,
             InteractionRepository interactions, FeedbackRepository feedback, CorrectionRepository corrections,
-            SlackMessenger messenger) {
+            SlackMessengers messengers) {
         this.detector = detector;
         this.conversations = conversations;
         this.interactions = interactions;
         this.feedback = feedback;
         this.corrections = corrections;
-        this.messenger = messenger;
+        this.messengers = messengers;
     }
 
     /**
@@ -76,12 +76,12 @@ public class CorrectionFlow {
             }
 
             String fact = v.fact().isBlank() ? text : v.fact();
-            long id = corrections.insertPending(tenantId, answer.id(), user, authorName(user), answer.question(),
+            long id = corrections.insertPending(tenantId, answer.id(), user, authorName(tenantId, user), answer.question(),
                     answer.answer(), cut(fact), dm);
             feedback.clearPrompts(tenantId, conversation.get().id());
             log.info("Correction stored: tenant={} correction={} interaction={} dm={}", tenantId, id, answer.id(), dm);
             try {
-                messenger.postMessage(channel, replyThreadTs, THANKS, null);
+                messengers.forTenant(tenantId).postMessage(channel, replyThreadTs, THANKS, null);
             } catch (Exception e) {
                 log.warn("Thanks could not be posted: channel={} error={}", channel, e.getClass().getName());
             }
@@ -93,9 +93,9 @@ public class CorrectionFlow {
         }
     }
 
-    private String authorName(String userId) {
+    private String authorName(long tenantId, String userId) {
         try {
-            String name = messenger.userDisplayName(userId);
+            String name = messengers.forTenant(tenantId).userDisplayName(userId);
             return name == null || name.isBlank() ? userId : name;
         } catch (Exception e) {
             return userId;

@@ -58,7 +58,7 @@ class GmailAudienceTest {
                 new Docs0Properties.Anthropic("", "test-model", new BigDecimal("2"), new BigDecimal("10"), 12),
                 new Docs0Properties.Budget(new BigDecimal("100")), new Docs0Properties.Slack("", ""),
                 new Docs0Properties.Drive(15, false), null, "", "", "");
-        TenantService tenants = new TenantService(jdbc, props);
+        TenantService tenants = new TenantService(jdbc);
 
         // Mail for ana@ and for the shared inbox support@ (viewers: lee@), synced the real way.
         DocumentStore store = new DocumentStore(jdbc);
@@ -70,7 +70,7 @@ class GmailAudienceTest {
         connection.connect(tenantId, new GmailKey(TestKeys.EMAIL, TestKeys.CLIENT_ID), FakeGmailClient.KEY);
         connection.setMailboxes(tenantId, List.of(new Mailbox("ana@example.com", List.of()),
                 new Mailbox("support@example.com", List.of("lee@example.com"))));
-        new GmailConnector(gmail, connection, store, new SyncRunRepository(jdbc), tenants, 90)
+        new GmailConnector(gmail, connection, store, new SyncRunRepository(jdbc), 90)
                 .sync(tenantId, connection.source(tenantId).orElseThrow().id());
 
         // Whatever audience the Slack layer builds is what the real search is asked with.
@@ -90,7 +90,7 @@ class GmailAudienceTest {
 
     private List<String> ask(String channel, String user) throws Exception {
         titlesSeen.clear();
-        CompletableFuture<Void> work = handler.handle(IncomingEvent.of(
+        CompletableFuture<Void> work = handler.handle(tenantId, IncomingEvent.of(
                 channel.startsWith("D") ? IncomingEvent.Kind.DIRECT_MESSAGE : IncomingEvent.Kind.MENTION,
                 channel, user, "<@UBOT> what is the okapi plan?", "100." + System.nanoTime() % 100000, null,
                 "Ev" + System.nanoTime()));

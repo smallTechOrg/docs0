@@ -29,9 +29,13 @@ public class SyncRunRepository {
         this.jdbc = jdbc;
     }
 
-    /** Records that a run has begun and returns its id. */
+    /** Records that a run has begun and returns its id. The source must belong to the tenant, or this fails. */
     public long start(long tenantId, long sourceId) {
-        return jdbc.sql("INSERT INTO sync_run (tenant_id, source_id) VALUES (:tenant, :source) RETURNING id")
+        return jdbc.sql("""
+                        INSERT INTO sync_run (tenant_id, source_id)
+                        SELECT s.tenant_id, s.id FROM source s WHERE s.id = :source AND s.tenant_id = :tenant
+                        RETURNING id
+                        """)
                 .param("tenant", tenantId)
                 .param("source", sourceId)
                 .query(Long.class)

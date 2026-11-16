@@ -71,10 +71,10 @@ public class CorrectionsController {
     }
 
     @GetMapping(PAGE)
-    public String page(HttpServletRequest request,
+    public String page(AdminPrincipal admin, HttpServletRequest request,
             @RequestParam(name = "tab", required = false) String tab,
             @RequestParam(name = "notice", required = false) String notice, Model model) {
-        long tenantId = tenants.current().id();
+        long tenantId = admin.tenantId();
         String current = tab != null && TABS.contains(tab) ? tab : "pending";
 
         List<Correction> waiting = corrections.pending(tenantId, LIST_LIMIT);
@@ -101,7 +101,7 @@ public class CorrectionsController {
                 .toList();
 
         model.addAttribute("csrf", AdminGuard.csrfToken(request.getSession()));
-        model.addAttribute("tenantName", tenants.current().name());
+        model.addAttribute("tenantName", tenants.name(admin.tenantId()));
         model.addAttribute("tab", current);
         model.addAttribute("privateNotice", PRIVATE_NOTICE);
         model.addAttribute("notice", notice == null ? null : NOTICES.get(notice));
@@ -112,21 +112,21 @@ public class CorrectionsController {
     }
 
     @PostMapping(PAGE + "/{id}/approve")
-    public RedirectView approve(@PathVariable long id,
+    public RedirectView approve(AdminPrincipal admin, @PathVariable long id,
             @RequestParam(name = "text", required = false) String text) {
         String edited = text == null ? null : text.length() <= MAX_EDIT_CHARS ? text : text.substring(0, MAX_EDIT_CHARS);
-        boolean done = corrections.approve(tenants.current().id(), id, edited);
+        boolean done = corrections.approve(admin.tenantId(), id, edited);
         return to("pending", done ? "approved" : "gone");
     }
 
     @PostMapping(PAGE + "/{id}/reject")
-    public RedirectView reject(@PathVariable long id) {
-        return to("pending", corrections.reject(tenants.current().id(), id) ? "rejected" : "gone");
+    public RedirectView reject(AdminPrincipal admin, @PathVariable long id) {
+        return to("pending", corrections.reject(admin.tenantId(), id) ? "rejected" : "gone");
     }
 
     @PostMapping(PAGE + "/{id}/unapprove")
-    public RedirectView unapprove(@PathVariable long id) {
-        return to("reviewed", corrections.unapprove(tenants.current().id(), id) ? "unapproved" : "gone");
+    public RedirectView unapprove(AdminPrincipal admin, @PathVariable long id) {
+        return to("reviewed", corrections.unapprove(admin.tenantId(), id) ? "unapproved" : "gone");
     }
 
     private static UnhappyRow row(UnhappyAnswer a, boolean redacted) {

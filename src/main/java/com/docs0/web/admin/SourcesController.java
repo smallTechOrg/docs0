@@ -106,15 +106,15 @@ public class SourcesController {
     }
 
     @GetMapping(PAGE)
-    public String page(HttpServletRequest request,
+    public String page(AdminPrincipal admin, HttpServletRequest request,
                        @RequestParam(name = "disconnect", required = false) String disconnect,
                        @RequestParam(name = "confirm", required = false) String confirm, Model model) {
-        long tenantId = tenants.current().id();
+        long tenantId = admin.tenantId();
         toolPanels.addTo(model, tenantId, confirm);
         slackHistory.addTo(model, tenantId);
         gmail.addTo(model, tenantId, confirm);
         model.addAttribute("csrf", AdminGuard.csrfToken(request.getSession()));
-        model.addAttribute("tenantName", tenants.current().name());
+        model.addAttribute("tenantName", tenants.name(admin.tenantId()));
         model.addAttribute("redirectUri", props.googleRedirectUri());
 
         List<String> missing = connection.missingSettings();
@@ -134,7 +134,7 @@ public class SourcesController {
         model.addAttribute("confirmDisconnect", disconnect != null);
 
         long sourceId = credential.get().sourceId();
-        boolean running = syncService.isRunning(sourceId);
+        boolean running = syncService.isRunning(admin.tenantId(), sourceId);
         model.addAttribute("syncRunning", running);
         model.addAttribute("documents", documents.count(tenantId, sourceId));
         model.addAttribute("runs", runs.recent(tenantId, sourceId, RECENT_RUNS).stream()
@@ -191,7 +191,7 @@ public class SourcesController {
     }
 
     @GetMapping(PAGE + "/google/callback")
-    public RedirectView callback(HttpServletRequest request,
+    public RedirectView callback(AdminPrincipal admin, HttpServletRequest request,
                                  @RequestParam(name = "state", required = false) String state,
                                  @RequestParam(name = "code", required = false) String code,
                                  @RequestParam(name = "error", required = false) String error,
@@ -227,7 +227,7 @@ public class SourcesController {
             return failed(flash, "Google did not give docs0 lasting access. "
                     + "Click Connect Google Drive to try again.");
         }
-        long tenantId = tenants.current().id();
+        long tenantId = admin.tenantId();
         String email = grant.accountEmail() == null || grant.accountEmail().isBlank()
                 ? "a Google account" : grant.accountEmail();
         connection.connect(tenantId, email, grant.refreshToken());
@@ -237,10 +237,10 @@ public class SourcesController {
     }
 
     @PostMapping(PAGE + "/folders/add")
-    public RedirectView addFolder(@RequestParam("id") String id, @RequestParam("name") String name,
+    public RedirectView addFolder(AdminPrincipal admin, @RequestParam("id") String id, @RequestParam("name") String name,
                                   @RequestParam(name = "back", required = false) String back,
                                   RedirectAttributes flash) {
-        long tenantId = tenants.current().id();
+        long tenantId = admin.tenantId();
         String cleanName = name.strip();
         if (connection.credential(tenantId).isEmpty() || !DRIVE_ID.matcher(id).matches() || cleanName.isEmpty()) {
             return failed(flash, "That folder could not be added.");
@@ -254,33 +254,33 @@ public class SourcesController {
     }
 
     @PostMapping(PAGE + "/folders/remove")
-    public RedirectView removeFolder(@RequestParam("id") String id,
+    public RedirectView removeFolder(AdminPrincipal admin, @RequestParam("id") String id,
                                      @RequestParam(name = "back", required = false) String back,
                                      RedirectAttributes flash) {
-        connection.removeFolder(tenants.current().id(), id);
+        connection.removeFolder(admin.tenantId(), id);
         flash.addFlashAttribute("notice", "Folder removed. Its documents drop out of answers at the next sync.");
         return to(safeBack(back));
     }
 
     @PostMapping(PAGE + "/sync")
-    public RedirectView syncNow(@RequestParam(name = "back", required = false) String back,
+    public RedirectView syncNow(AdminPrincipal admin, @RequestParam(name = "back", required = false) String back,
                                 RedirectAttributes flash) {
-        long tenantId = tenants.current().id();
+        long tenantId = admin.tenantId();
         if (connection.credential(tenantId).isEmpty()) {
             return failed(flash, "Connect Google Drive first.");
         }
         counts.forget(tenantId);
-        if (!syncService.startInBackground(connector)) {
+        if (!syncService.startInBackground(admin.tenantId(), connector)) {
             flash.addFlashAttribute("notice", "A sync is already running.");
         }
         return to(safeBack(back));
     }
 
     @PostMapping(PAGE + "/disconnect")
-    public RedirectView disconnect(RedirectAttributes flash) {
-        long tenantId = tenants.current().id();
+    public RedirectView disconnect(AdminPrincipal admin, RedirectAttributes flash) {
+        long tenantId = admin.tenantId();
         Optional<Source> source = connection.source(tenantId);
-        if (source.isPresent() && syncService.isRunning(source.get().id())) {
+        if (source.isPresent() && syncService.isRunning(admin.tenantId(), source.get().id())) {
             return failed(flash, "A sync is running. Disconnect when it has finished.");
         }
         connection.disconnect(tenantId);

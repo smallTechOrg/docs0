@@ -66,7 +66,7 @@ class GrainSyncTest extends IntegrationTest {
         grain = new FakeGrainClient();
         clock = Clock.fixed(NOW, ZoneOffset.UTC);
         connection = new GrainConnection(new TokenCipher(DriveTestSetup.ENCRYPTION_KEY), sources, credentials, store);
-        connector = new GrainConnector(grain, connection, store, runs, tenants, 30, clock);
+        connector = new GrainConnector(grain, connection, store, runs, 30, clock);
         connection.connect(tenant.id(), "Acme Workspace", FakeGrainClient.GOOD_TOKEN);
     }
 
@@ -128,7 +128,7 @@ class GrainSyncTest extends IntegrationTest {
         assertThat(sync()).isEqualTo(new SyncCounts(2, 0, 0, 0, 0));
 
         // Ten days later r2 (started 2026-02-20) is older than 30 days; r1 still is not.
-        GrainConnector later = new GrainConnector(grain, connection, store, runs, tenants, 30,
+        GrainConnector later = new GrainConnector(grain, connection, store, runs, 30,
                 Clock.fixed(NOW.plusSeconds(10 * 86400), ZoneOffset.UTC));
         assertThat(later.sync(tenant.id(), sourceId())).isEqualTo(new SyncCounts(0, 0, 1, 0, 0));
 
@@ -214,7 +214,7 @@ class GrainSyncTest extends IntegrationTest {
         sync();
         grain.readFailure = new SourceAccessException(HttpGrainClient.REJECTED);
 
-        SyncRun run = syncService.run(connector).orElseThrow();
+        SyncRun run = syncService.run(tenant.id(), connector).orElseThrow();
 
         assertThat(run.status()).isEqualTo(SyncRun.FAILED);
         assertThat(run.error()).isEqualTo("Grain rejected the access token. Reconnect Grain on the Sources page.");
@@ -227,7 +227,7 @@ class GrainSyncTest extends IntegrationTest {
         sync();
         grain.readFailure = new IOException("Grain is limiting how fast docs0 can read. Try again in a few minutes.");
 
-        SyncRun run = syncService.run(connector).orElseThrow();
+        SyncRun run = syncService.run(tenant.id(), connector).orElseThrow();
 
         assertThat(run.status()).isEqualTo(SyncRun.FAILED);
         assertThat(run.error()).contains("limiting how fast");
@@ -240,20 +240,20 @@ class GrainSyncTest extends IntegrationTest {
 
         assertThatThrownBy(() -> sync()).isInstanceOf(SourceAccessException.class)
                 .hasMessageContaining("Grain is not connected");
-        assertThat(connector.configured()).isFalse();
+        assertThat(connector.configured(tenant.id())).isFalse();
     }
 
     @Test
     void disconnectingRemovesTheTokenAndTheDocuments() throws Exception {
         add("r1", "First", T0);
         sync();
-        assertThat(connector.configured()).isTrue();
+        assertThat(connector.configured(tenant.id())).isTrue();
 
         connection.disconnect(tenant.id());
 
         assertThat(connection.credential(tenant.id())).isEmpty();
         assertThat(store.count(tenant.id(), sourceId())).isZero();
-        assertThat(connector.configured()).isFalse();
+        assertThat(connector.configured(tenant.id())).isFalse();
         assertThat(search.search(tenant.id(), ANYONE, "first", 5).hits()).isEmpty();
     }
 
@@ -271,21 +271,21 @@ class GrainSyncTest extends IntegrationTest {
     @Test
     void statusSaysWhatIsMissingWhatFailedAndHowMuchIsIndexed() throws Exception {
         connection.disconnect(tenant.id());
-        assertThat(connector.status()).isEqualTo(
+        assertThat(connector.status(tenant.id())).isEqualTo(
                 ComponentStatus.off("Grain", "not connected — connect it on the Sources page"));
 
         connection.connect(tenant.id(), "Acme Workspace", FakeGrainClient.GOOD_TOKEN);
-        assertThat(connector.status().state()).isEqualTo(State.UP);
-        assertThat(connector.status().detail()).contains("connected to Acme Workspace", "waiting for first sync");
+        assertThat(connector.status(tenant.id()).state()).isEqualTo(State.UP);
+        assertThat(connector.status(tenant.id()).detail()).contains("connected to Acme Workspace", "waiting for first sync");
 
         add("r1", "First", T0);
-        syncService.run(connector);
-        assertThat(connector.status().state()).isEqualTo(State.UP);
-        assertThat(connector.status().detail()).startsWith("1 recordings, last sync ");
+        syncService.run(tenant.id(), connector);
+        assertThat(connector.status(tenant.id()).state()).isEqualTo(State.UP);
+        assertThat(connector.status(tenant.id()).detail()).startsWith("1 recordings, last sync ");
 
         grain.readFailure = new SourceAccessException(HttpGrainClient.REJECTED);
-        syncService.run(connector);
-        ComponentStatus down = connector.status();
+        syncService.run(tenant.id(), connector);
+        ComponentStatus down = connector.status(tenant.id());
         assertThat(down.state()).isEqualTo(State.DOWN);
         assertThat(down.detail()).startsWith("last sync failed: Grain rejected the access token");
     }

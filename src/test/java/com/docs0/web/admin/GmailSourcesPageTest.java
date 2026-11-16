@@ -74,7 +74,7 @@ class GmailSourcesPageTest extends IntegrationTest {
     @AfterEach
     void letSyncsFinish() {
         await().atMost(15, TimeUnit.SECONDS).until(() ->
-                gmail.source(tenant.id()).map(s -> !syncService.isRunning(s.id())).orElse(true));
+                gmail.source(tenant.id()).map(s -> !syncService.isRunning(tenant.id(), s.id())).orElse(true));
     }
 
     // ---- the key ---------------------------------------------------------------------------
@@ -303,7 +303,7 @@ class GmailSourcesPageTest extends IntegrationTest {
 
         mvc.perform(form("/admin/sources/gmail/sync")).andExpect(status().isFound())
                 .andExpect(redirectedUrl("/admin/sources#gmail"));
-        await().atMost(15, TimeUnit.SECONDS).until(() -> !syncService.isRunning(gmail.source(tenant.id()).orElseThrow().id()));
+        await().atMost(15, TimeUnit.SECONDS).until(() -> !syncService.isRunning(tenant.id(), gmail.source(tenant.id()).orElseThrow().id()));
 
         String html = page("/admin/sources");
         assertThat(html).contains("<span>1</span> added").contains("Complete").contains("<span>1</span> mail threads indexed");
@@ -319,7 +319,7 @@ class GmailSourcesPageTest extends IntegrationTest {
         connect();
         gmail.setMailboxes(tenant.id(), List.of(new Mailbox(ANA, List.of())));
         gmailApi.put(ANA, "t1", "1", "Launch mail", "launch text", Instant.now());
-        syncService.run(connector);
+        syncService.run(tenant.id(), connector);
         assertThat(search.count(tenant.id())).isEqualTo(1);
 
         String ask = page("/admin/sources?confirm=gmail");
@@ -334,7 +334,7 @@ class GmailSourcesPageTest extends IntegrationTest {
         assertThat(jdbc.sql("SELECT count(*) FROM document WHERE NOT deleted").query(Long.class).single()).isZero();
         assertThat(gmail.mailboxes(tenant.id())).isEmpty();
         assertThat(follow(done)).contains("Gmail disconnected.").contains("id=\"gmail-not-connected\"");
-        assertThat(connector.status().detail()).contains("not connected");
+        assertThat(connector.status(tenant.id()).detail()).contains("not connected");
     }
 
     @Test

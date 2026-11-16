@@ -59,7 +59,7 @@ class TrelloSyncTest extends IntegrationTest {
     void setUp() {
         trello = new FakeTrelloClient();
         connection = new TrelloConnection(new TokenCipher(DriveTestSetup.ENCRYPTION_KEY), sources, credentials, store);
-        connector = new TrelloConnector(trello, connection, store, runs, tenants);
+        connector = new TrelloConnector(trello, connection, store, runs);
         connection.connect(tenant.id(), "Asha Rao (@asharao)", FakeTrelloClient.GOOD_KEY, FakeTrelloClient.GOOD_TOKEN);
         connection.setBoards(tenant.id(), List.of(ROADMAP));
     }
@@ -112,7 +112,7 @@ class TrelloSyncTest extends IntegrationTest {
         sync();
         trello.readFailure = new SourceAccessException(HttpTrelloClient.REJECTED);
 
-        SyncRun run = syncService.run(connector).orElseThrow();
+        SyncRun run = syncService.run(tenant.id(), connector).orElseThrow();
 
         assertThat(run.status()).isEqualTo(SyncRun.FAILED);
         assertThat(run.error()).isEqualTo("Trello rejected the key or token. Reconnect Trello on the Sources page.");
@@ -128,7 +128,7 @@ class TrelloSyncTest extends IntegrationTest {
         sync();
         trello.brokenBoards.add("b2");
 
-        SyncRun run = syncService.run(connector).orElseThrow();
+        SyncRun run = syncService.run(tenant.id(), connector).orElseThrow();
 
         assertThat(run.status()).isEqualTo(SyncRun.FAILED);
         assertThat(run.error()).contains("\"Hiring\"", "untick it on the Sources page");
@@ -154,12 +154,12 @@ class TrelloSyncTest extends IntegrationTest {
         int reads = trello.boardsRead.size();
         connection.setBoards(tenant.id(), List.of());
 
-        assertThat(connector.configured()).isTrue();
+        assertThat(connector.configured(tenant.id())).isTrue();
         assertThat(sync()).isEqualTo(new SyncCounts(0, 0, 2, 0, 0));
 
         assertThat(trello.boardsRead).hasSize(reads);
         assertThat(store.count(tenant.id(), sourceId())).isZero();
-        assertThat(connector.configured()).isFalse();
+        assertThat(connector.configured(tenant.id())).isFalse();
     }
 
     @Test
@@ -193,24 +193,24 @@ class TrelloSyncTest extends IntegrationTest {
     @Test
     void statusSaysWhatIsMissingWhatFailedAndHowMuchIsIndexed() throws Exception {
         connection.disconnect(tenant.id());
-        assertThat(connector.status()).isEqualTo(
+        assertThat(connector.status(tenant.id())).isEqualTo(
                 ComponentStatus.off("Trello", "not connected — connect it on the Sources page"));
 
         connection.connect(tenant.id(), "Asha", FakeTrelloClient.GOOD_KEY, FakeTrelloClient.GOOD_TOKEN);
         connection.setBoards(tenant.id(), List.of());
-        assertThat(connector.status()).isEqualTo(ComponentStatus.off("Trello", "connected, nothing chosen yet"));
+        assertThat(connector.status(tenant.id())).isEqualTo(ComponentStatus.off("Trello", "connected, nothing chosen yet"));
 
         connection.setBoards(tenant.id(), List.of(ROADMAP));
-        assertThat(connector.status().detail()).contains("waiting for first sync");
+        assertThat(connector.status(tenant.id()).detail()).contains("waiting for first sync");
 
         cards(FakeTrelloClient.card("c1", "First", "l-todo", T0));
-        syncService.run(connector);
-        assertThat(connector.status().state()).isEqualTo(State.UP);
-        assertThat(connector.status().detail()).startsWith("2 documents, last sync ");
+        syncService.run(tenant.id(), connector);
+        assertThat(connector.status(tenant.id()).state()).isEqualTo(State.UP);
+        assertThat(connector.status(tenant.id()).detail()).startsWith("2 documents, last sync ");
 
         trello.readFailure = new SourceAccessException(HttpTrelloClient.REJECTED);
-        syncService.run(connector);
-        assertThat(connector.status().state()).isEqualTo(State.DOWN);
-        assertThat(connector.status().detail()).startsWith("last sync failed: Trello rejected the key or token");
+        syncService.run(tenant.id(), connector);
+        assertThat(connector.status(tenant.id()).state()).isEqualTo(State.DOWN);
+        assertThat(connector.status(tenant.id()).detail()).startsWith("last sync failed: Trello rejected the key or token");
     }
 }

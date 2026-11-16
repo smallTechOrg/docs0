@@ -51,7 +51,7 @@ class QuestionHandlerDraftTest {
         CorrectionFlow flow = new CorrectionFlow(new CorrectionDetector(llm, props), new ConversationRepository(jdbc),
                 new InteractionRepository(jdbc), new com.docs0.feedback.FeedbackRepository(jdbc),
                 new com.docs0.feedback.CorrectionRepository(jdbc), slack);
-        handler = new QuestionHandler(new TenantService(jdbc, props), agent, new FakeKnowledge(),
+        handler = new QuestionHandler(new TenantService(jdbc), agent, new FakeKnowledge(),
                 new BudgetService(jdbc, props), new ConversationRepository(jdbc), new InteractionRepository(jdbc), slack,
                 flow, pending, new IdentityService(jdbc, slack), Duration.ZERO);
     }
@@ -78,7 +78,7 @@ class QuestionHandlerDraftTest {
 
     @Test
     void theAgentIsToldWhereAndWhoAskedSoItCanDraft() throws Exception {
-        handler.handle(mention("please file an issue")).get();
+        handler.handle(tenantId, mention("please file an issue")).get();
 
         assertThat(agent.requests).hasSize(1);
         assertThat(agent.requests.get(0).requesterSlackId()).isEqualTo("U1");
@@ -89,7 +89,7 @@ class QuestionHandlerDraftTest {
     void aDraftIsPostedInTheThreadAfterTheAnswerWithItsButtonsAndLinkedToTheInteraction() throws Exception {
         agentDrafts(Kind.ANSWER, false);
 
-        handler.handle(mention("please file an issue for the login bug")).get();
+        handler.handle(tenantId, mention("please file an issue for the login bug")).get();
 
         // The status line became the answer; the draft is a separate message in the same thread.
         assertThat(slack.lastUpdate().text()).contains("I drafted an issue in ENG.");
@@ -113,7 +113,7 @@ class QuestionHandlerDraftTest {
         agentDrafts(Kind.ANSWER, false);
         slack.failPostWhen = text -> text.startsWith("Draft ");
 
-        handler.handle(mention("file it")).get();
+        handler.handle(tenantId, mention("file it")).get();
 
         assertThat(slack.lastUpdate().text()).contains("I drafted an issue");
         assertThat(onlyDraftStatus()).isEqualTo(Status.CANCELLED);
@@ -123,7 +123,7 @@ class QuestionHandlerDraftTest {
     void anAnswerThatFailedShowsNoDraftAndDropsIt() throws Exception {
         agentDrafts(Kind.ERROR, true);
 
-        handler.handle(mention("file it")).get();
+        handler.handle(tenantId, mention("file it")).get();
 
         assertThat(slack.posts).hasSize(1); // only the status line
         assertThat(slack.lastUpdate().text()).isEqualTo(QuestionHandler.APOLOGY);
@@ -132,7 +132,7 @@ class QuestionHandlerDraftTest {
 
     @Test
     void anAnswerWithoutDraftsPostsNothingExtra() throws Exception {
-        handler.handle(mention("what is our pricing?")).get();
+        handler.handle(tenantId, mention("what is our pricing?")).get();
 
         assertThat(slack.posts).hasSize(1);
         assertThat(jdbc.sql("SELECT count(*) FROM pending_action").query(Long.class).single()).isZero();
@@ -146,7 +146,7 @@ class QuestionHandlerDraftTest {
             return SlackFakes.result(Kind.ANSWER, "ok");
         };
 
-        handler.followUp(CHANNEL, "100.1", "U2", "And the other one?", "act-1").get();
+        handler.followUp(tenantId, CHANNEL, "100.1", "U2", "And the other one?", "act-1").get();
 
         assertThat(requesters).containsExactly("U2");
     }

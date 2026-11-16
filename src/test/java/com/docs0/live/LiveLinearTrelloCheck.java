@@ -65,7 +65,7 @@ class LiveLinearTrelloCheck extends IntegrationTest {
         LinearConnection connection = new LinearConnection(cipher, sources, credentials, store);
         connection.connect(tenant.id(), viewer.workspaceName(), key);
         connection.setTeams(tenant.id(), List.of(teams.get(0)));
-        LinearConnector connector = new LinearConnector(client, connection, store, runs, tenants);
+        LinearConnector connector = new LinearConnector(client, connection, store, runs);
 
         SyncCounts counts = connector.sync(tenant.id(), connection.source(tenant.id()).orElseThrow().id());
         System.out.println("LINEAR first team " + teams.get(0).key() + " sync: " + counts + " documents="
@@ -89,7 +89,7 @@ class LiveLinearTrelloCheck extends IntegrationTest {
         TrelloConnection connection = new TrelloConnection(cipher, sources, credentials, store);
         connection.connect(tenant.id(), account.fullName(), key, token);
         connection.setBoards(tenant.id(), List.of(boards.get(0)));
-        TrelloConnector connector = new TrelloConnector(client, connection, store, runs, tenants);
+        TrelloConnector connector = new TrelloConnector(client, connection, store, runs);
 
         SyncCounts counts = connector.sync(tenant.id(), connection.source(tenant.id()).orElseThrow().id());
         System.out.println("TRELLO first board sync: " + counts + " documents="

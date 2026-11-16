@@ -10,7 +10,6 @@ import com.docs0.source.SourceConnector;
 import com.docs0.source.SyncCounts;
 import com.docs0.source.SyncRun;
 import com.docs0.source.SyncRunRepository;
-import com.docs0.tenant.TenantService;
 import com.docs0.web.StatusContributor;
 import java.io.IOException;
 import java.time.Instant;
@@ -39,15 +38,13 @@ public class DriveConnector implements SourceConnector, StatusContributor {
     private final DriveConnection connection;
     private final DocumentStore documents;
     private final SyncRunRepository runs;
-    private final TenantService tenants;
 
     public DriveConnector(DriveClient client, DriveConnection connection, DocumentStore documents,
-                          SyncRunRepository runs, TenantService tenants) {
+                          SyncRunRepository runs) {
         this.client = client;
         this.connection = connection;
         this.documents = documents;
         this.runs = runs;
-        this.tenants = tenants;
     }
 
     @Override
@@ -71,8 +68,7 @@ public class DriveConnector implements SourceConnector, StatusContributor {
      * connected Drive with nothing chosen and nothing indexed adds no rows to the sync log.
      */
     @Override
-    public boolean configured() {
-        long tenantId = tenants.current().id();
+    public boolean configured(long tenantId) {
         Optional<Source> source = connection.source(tenantId);
         if (source.isEmpty() || connection.credential(tenantId).isEmpty()) {
             return false;
@@ -138,8 +134,7 @@ public class DriveConnector implements SourceConnector, StatusContributor {
 
     /** Reads only the database; never calls Google. */
     @Override
-    public ComponentStatus status() {
-        long tenantId = tenants.current().id();
+    public ComponentStatus status(long tenantId) {
         Optional<SourceCredential> credential = connection.credential(tenantId);
         if (credential.isEmpty()) {
             return ComponentStatus.off(NAME, "not connected — connect it on the Sources page");

@@ -16,9 +16,9 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Semaphore;
-import java.util.concurrent.atomic.AtomicBoolean;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.jdbc.core.simple.JdbcClient;
@@ -45,13 +45,14 @@ public class IdentityService {
     private static final Gson GSON = new Gson();
 
     private final JdbcClient jdbc;
-    private final SlackMessenger messenger;
-    private final AtomicBoolean warned = new AtomicBoolean();
-    private volatile boolean missingScopeSeen;
+    private final SlackMessengers messengers;
+    /** Tenants whose Slack app was seen lacking the email scope, and those already warned about. Per tenant. */
+    private final Set<Long> missingScopeSeen = ConcurrentHashMap.newKeySet();
+    private final Set<Long> warned = ConcurrentHashMap.newKeySet();
 
-    public IdentityService(JdbcClient jdbc, SlackMessenger messenger) {
+    public IdentityService(JdbcClient jdbc, SlackMessengers messengers) {
         this.jdbc = jdbc;
-        this.messenger = messenger;
+        this.messengers = messengers;
     }
 
     /** One person, from the cache or from Slack. Empty when Slack cannot say and nothing is cached. */
@@ -110,19 +111,19 @@ public class IdentityService {
     }
 
     /** True when the Slack app cannot read emails, so people are matched by Slack user id only. */
-    public boolean emailScopeMissing() {
-        if (missingScopeSeen) {
+    public boolean emailScopeMissing(long tenantId) {
+        if (missingScopeSeen.contains(tenantId)) {
             return true;
         }
         Set<String> scopes;
         try {
-            scopes = messenger.botScopes();
+            scopes = messengers.forTenant(tenantId).botScopes();
         } catch (RuntimeException e) {
             return false;
         }
         boolean missing = !scopes.isEmpty() && !scopes.contains(EMAIL_SCOPE);
         if (missing) {
-            warnOnce();
+            warnOnce(tenantId);
         }
         return missing;
     }
@@ -130,6 +131,13 @@ public class IdentityService {
     private Map<String, Person> refresh(long tenantId, List<String> ids, Duration budget) {
         Map<String, Person> refreshed = new java.util.concurrent.ConcurrentHashMap<>();
         Instant deadline = Instant.now().plus(budget);
+        SlackMessenger messenger;
+        try {
+            messenger = messengers.forTenant(tenantId);
+        } catch (RuntimeException e) {
+            log.debug("No Slack workspace to look users up in: tenant={}", tenantId);
+            return refreshed;
+        }
         Semaphore slots = new Semaphore(PARALLEL_LOOKUPS);
         try (var workers = Executors.newVirtualThreadPerTaskExecutor()) {
             for (String id : ids) {
@@ -145,8 +153,8 @@ public class IdentityService {
                         refreshed.put(id, person);
                     } catch (SlackCallException e) {
                         if ("missing_scope".equals(e.code())) {
-                            missingScopeSeen = true;
-                            warnOnce();
+                            missingScopeSeen.add(tenantId);
+                            warnOnce(tenantId);
                         }
                         log.debug("User lookup failed: code={}", e.code());
                     } catch (RuntimeException e) {
@@ -160,10 +168,10 @@ public class IdentityService {
         return refreshed;
     }
 
-    private void warnOnce() {
-        if (warned.compareAndSet(false, true)) {
-            log.warn("The Slack app cannot read email addresses (scope {} missing). People are matched by Slack "
-                    + "user id only. Add the scope to the app and reinstall it.", EMAIL_SCOPE);
+    private void warnOnce(long tenantId) {
+        if (warned.add(tenantId)) {
+            log.warn("The Slack app of tenant {} cannot read email addresses (scope {} missing). People are matched by "
+                    + "Slack user id only. Add the scope to the app and reinstall it.", tenantId, EMAIL_SCOPE);
         }
     }
 

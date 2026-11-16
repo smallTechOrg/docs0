@@ -3,7 +3,8 @@ package com.docs0.web;
 /** Implemented by each integration (Slack, Anthropic, Drive) to report its state on the status page. */
 public interface StatusContributor {
 
-    ComponentStatus status();
+    /** The state of this integration for one tenant. Global components (the model) ignore the tenant. */
+    ComponentStatus status(long tenantId);
 
     /** UP: working. OFF: not configured (expected, not an error). DOWN: configured but failing. */
     enum State { UP, OFF, DOWN }

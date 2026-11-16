@@ -1,16 +1,14 @@
 package com.docs0.web.admin;
 
-import com.docs0.config.Docs0Properties;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.servlet.http.HttpSession;
 import java.io.IOException;
-import java.net.InetAddress;
-import java.net.UnknownHostException;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.SecureRandom;
 import java.util.Base64;
+import java.util.Optional;
 import java.util.Set;
 import org.springframework.stereotype.Component;
 import org.springframework.web.servlet.HandlerInterceptor;
@@ -18,8 +16,10 @@ import org.springframework.web.servlet.HandlerInterceptor;
 /**
  * Guards every request under /admin.
  *
- * <p>Who may enter: with DOCS0_ADMIN_PASSWORD set, anyone who signs in over HTTP Basic as
- * user "admin". Without it, only requests made directly from this machine.
+ * <p>Who may enter, and which tenant they administer, is decided by the {@link AdminAuthenticator}; the result is
+ * an {@link AdminPrincipal} that controllers receive as a method parameter. The pilot authenticator lets in anyone
+ * who signs in over HTTP Basic as user "admin" when DOCS0_ADMIN_PASSWORD is set, and otherwise only requests made
+ * directly from this machine.
  *
  * <p>Requests that change something (anything but GET, HEAD, OPTIONS) must also carry the
  * session's CSRF token in the {@code _csrf} form field.
@@ -30,34 +30,31 @@ public class AdminGuard implements HandlerInterceptor {
     public static final String CSRF_PARAMETER = "_csrf";
 
     private static final String CSRF_SESSION_ATTRIBUTE = "docs0.csrf";
-    private static final String USER = "admin";
     private static final Set<String> READ_METHODS = Set.of("GET", "HEAD", "OPTIONS");
     private static final SecureRandom RANDOM = new SecureRandom();
 
-    private final Docs0Properties props;
+    /** The request attribute that carries the signed-in {@link AdminPrincipal}. */
+    public static final String PRINCIPAL_ATTRIBUTE = "docs0.adminPrincipal";
 
-    public AdminGuard(Docs0Properties props) {
-        this.props = props;
+    private final AdminAuthenticator authenticator;
+
+    public AdminGuard(AdminAuthenticator authenticator) {
+        this.authenticator = authenticator;
     }
 
     @Override
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler)
             throws IOException {
-        if (props.adminPasswordSet()) {
-            if (!passwordMatches(request.getHeader("Authorization"))) {
-                response.setHeader("WWW-Authenticate", "Basic realm=\"docs0 admin\", charset=\"UTF-8\"");
-                response.sendError(HttpServletResponse.SC_UNAUTHORIZED);
-                return false;
-            }
-        } else if (!fromThisMachine(request)) {
-            response.sendError(HttpServletResponse.SC_FORBIDDEN,
-                    "Admin pages are only available on the machine docs0 runs on until DOCS0_ADMIN_PASSWORD is set.");
+        Optional<AdminPrincipal> principal = authenticator.authenticate(request);
+        if (principal.isEmpty()) {
+            authenticator.deny(request, response);
             return false;
         }
         if (!READ_METHODS.contains(request.getMethod()) && !csrfTokenMatches(request)) {
             response.sendError(HttpServletResponse.SC_FORBIDDEN, "This form has expired. Go back, reload and retry.");
             return false;
         }
+        request.setAttribute(PRINCIPAL_ATTRIBUTE, principal.get());
         return true;
     }
 
@@ -87,44 +84,6 @@ public class AdminGuard implements HandlerInterceptor {
             return false;
         }
         return MessageDigest.isEqual(a.getBytes(StandardCharsets.UTF_8), b.getBytes(StandardCharsets.UTF_8));
-    }
-
-    private boolean passwordMatches(String authorization) {
-        if (authorization == null || !authorization.regionMatches(true, 0, "Basic ", 0, 6)) {
-            return false;
-        }
-        String decoded;
-        try {
-            decoded = new String(Base64.getDecoder().decode(authorization.substring(6).trim()),
-                    StandardCharsets.UTF_8);
-        } catch (IllegalArgumentException e) {
-            return false;
-        }
-        int colon = decoded.indexOf(':');
-        if (colon < 0) {
-            return false;
-        }
-        // Both comparisons always run, so a wrong user name takes as long as a wrong password.
-        boolean userOk = sameValue(decoded.substring(0, colon), USER);
-        boolean passwordOk = sameValue(decoded.substring(colon + 1), props.adminPassword());
-        return userOk & passwordOk;
-    }
-
-    /**
-     * True for a loopback connection that did not come through a proxy. A reverse proxy on
-     * this machine makes every visitor look local, so anything carrying forwarding headers
-     * is refused: set DOCS0_ADMIN_PASSWORD when docs0 sits behind a proxy.
-     */
-    private static boolean fromThisMachine(HttpServletRequest request) {
-        if (request.getHeader("X-Forwarded-For") != null || request.getHeader("Forwarded") != null) {
-            return false;
-        }
-        try {
-            // The remote address is an IP literal, so this does no DNS lookup.
-            return InetAddress.getByName(request.getRemoteAddr()).isLoopbackAddress();
-        } catch (UnknownHostException | RuntimeException e) {
-            return false;
-        }
     }
 
     private static boolean csrfTokenMatches(HttpServletRequest request) {

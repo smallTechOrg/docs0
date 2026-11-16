@@ -506,9 +506,9 @@ class AgentServiceTest {
             AgentService service = service(key, 12);
 
             assertThat(service.available()).isFalse();
-            assertThat(service.status().name()).isEqualTo("Anthropic");
-            assertThat(service.status().state()).isEqualTo(State.OFF);
-            assertThat(service.status().detail()).isEqualTo("no API key configured");
+            assertThat(service.status(1L).name()).isEqualTo("Anthropic");
+            assertThat(service.status(1L).state()).isEqualTo(State.OFF);
+            assertThat(service.status(1L).detail()).isEqualTo("no API key configured");
 
             AgentResult result = ask(service, "pricing?", List.of());
             assertThat(result.kind()).isEqualTo(Kind.ERROR);
@@ -522,9 +522,9 @@ class AgentServiceTest {
         AgentService service = service("test-key", 12);
 
         assertThat(service.available()).isTrue();
-        assertThat(service.status().name()).isEqualTo("Anthropic");
-        assertThat(service.status().state()).isEqualTo(State.UP);
-        assertThat(service.status().detail()).isEqualTo("claude-sonnet-5-5");
+        assertThat(service.status(1L).name()).isEqualTo("Anthropic");
+        assertThat(service.status(1L).state()).isEqualTo(State.UP);
+        assertThat(service.status(1L).detail()).isEqualTo("claude-sonnet-5-5");
         assertThat(llm.sessions).isZero();
     }
 }

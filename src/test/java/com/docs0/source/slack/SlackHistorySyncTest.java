@@ -58,8 +58,8 @@ class SlackHistorySyncTest extends IntegrationTest {
         slack = new FakeSlack().user("U1", "Priya", "priya@example.com").user("U2", "Marco", "marco@example.com")
                 .user("U3", "Lena", "lena@example.com");
         connection = new SlackHistoryConnection(sources);
-        connector = new SlackHistoryConnector(slack, new IdentityService(jdbc, slack), connection, store, runs, tenants,
-                true, DAYS, Clock.fixed(NOW, ZoneOffset.UTC));
+        connector = new SlackHistoryConnector(slack, new IdentityService(jdbc, slack), connection, store, runs,
+                DAYS, Clock.fixed(NOW, ZoneOffset.UTC));
     }
 
     private long sourceId() {
@@ -119,12 +119,12 @@ class SlackHistorySyncTest extends IntegrationTest {
     void nothingIsIndexedUntilAChannelIsChosen() throws Exception {
         publicGeneral();
 
-        assertThat(connector.configured()).isFalse();
+        assertThat(connector.configured(tenant.id())).isFalse();
         assertThat(sync()).isEqualTo(SyncCounts.NONE);
 
         assertThat(slack.historyCalls).isEmpty();
         assertThat(store.count(tenant.id(), sourceId())).isZero();
-        ComponentStatus status = connector.status();
+        ComponentStatus status = connector.status(tenant.id());
         assertThat(status.name()).isEqualTo("Slack history");
         assertThat(status.state()).isEqualTo(State.OFF);
     }
@@ -266,8 +266,8 @@ class SlackHistorySyncTest extends IntegrationTest {
         SyncCounts counts = sync();
 
         assertThat(counts).isEqualTo(new SyncCounts(1, 0, 0, 1, 0));
-        assertThat(connector.notes()).containsKey("C1");
-        assertThat(connector.notes().get("C1")).contains("#general", "could not join");
+        assertThat(connector.notes(tenant.id())).containsKey("C1");
+        assertThat(connector.notes(tenant.id()).get("C1")).contains("#general", "could not join");
     }
 
     @Test
@@ -281,7 +281,7 @@ class SlackHistorySyncTest extends IntegrationTest {
         SyncCounts counts = sync();
 
         assertThat(counts).isEqualTo(new SyncCounts(0, 0, 1, 1, 0));
-        assertThat(connector.notes().get("G1")).isEqualTo("invite @docs0 to #leads");
+        assertThat(connector.notes(tenant.id()).get("G1")).isEqualTo("invite @docs0 to #leads");
         assertThat(live()).isEmpty();
         assertThat(slack.joins).isEmpty();
     }
@@ -494,7 +494,7 @@ class SlackHistorySyncTest extends IntegrationTest {
 
         // Thirty days later the fifth is outside the window: a full pass drops it.
         SlackHistoryConnector later = new SlackHistoryConnector(slack, new IdentityService(jdbc, slack), connection, store,
-                runs, tenants, true, DAYS, Clock.fixed(NOW.plusSeconds(26L * 86400), ZoneOffset.UTC));
+                runs, DAYS, Clock.fixed(NOW.plusSeconds(26L * 86400), ZoneOffset.UTC));
         later.sync(tenant.id(), sourceId());
 
         assertThat(live()).containsExactly("day:C1:2026-11-16");
@@ -513,7 +513,7 @@ class SlackHistorySyncTest extends IntegrationTest {
 
         assertThat(counts.removed()).isEqualTo(1);
         assertThat(live()).containsExactly("day:C1:2026-11-16");
-        assertThat(connector.configured()).isTrue();
+        assertThat(connector.configured(tenant.id())).isTrue();
     }
 
     @Test
@@ -523,11 +523,11 @@ class SlackHistorySyncTest extends IntegrationTest {
         sync();
 
         choose();
-        assertThat(connector.configured()).isTrue(); // documents remain, so a run is still needed
+        assertThat(connector.configured(tenant.id())).isTrue(); // documents remain, so a run is still needed
         assertThat(sync().removed()).isEqualTo(1);
 
         assertThat(live()).isEmpty();
-        assertThat(connector.configured()).isFalse();
+        assertThat(connector.configured(tenant.id())).isFalse();
         assertThat(slack.historyCalls).hasSize(1);
     }
 
@@ -541,7 +541,7 @@ class SlackHistorySyncTest extends IntegrationTest {
         SyncCounts counts = sync();
 
         assertThat(counts).isEqualTo(new SyncCounts(0, 0, 1, 1, 0));
-        assertThat(connector.notes().get("C1")).contains("not found or is archived");
+        assertThat(connector.notes(tenant.id()).get("C1")).contains("not found or is archived");
     }
 
     @Test
@@ -576,11 +576,15 @@ class SlackHistorySyncTest extends IntegrationTest {
 
     @Test
     void withoutABotTokenTheRunFailsWithAClearMessage() {
-        SlackHistoryConnector noToken = new SlackHistoryConnector(slack, new IdentityService(jdbc, slack), connection, store,
-                runs, tenants, false, DAYS, Clock.fixed(NOW, ZoneOffset.UTC));
+        // A tenant with no Slack workspace: asking for its messenger fails like the real registry does.
+        com.docs0.slack.SlackMessengers unconnected = t -> {
+            throw new com.docs0.slack.SlackMessenger.SlackCallException("workspace", "no_workspace", null);
+        };
+        SlackHistoryConnector noToken = new SlackHistoryConnector(unconnected, new IdentityService(jdbc, slack), connection, store,
+                runs, DAYS, Clock.fixed(NOW, ZoneOffset.UTC));
 
-        assertThat(noToken.configured()).isFalse();
-        assertThat(noToken.status().state()).isEqualTo(State.OFF);
+        assertThat(noToken.configured(tenant.id())).isFalse();
+        assertThat(noToken.status(tenant.id()).state()).isEqualTo(State.OFF);
         assertThatThrownBy(() -> noToken.sync(tenant.id(), 1L))
                 .isInstanceOf(SourceAccessException.class).hasMessageContaining("DOCS0_SLACK_BOT_TOKEN");
     }
@@ -589,16 +593,16 @@ class SlackHistorySyncTest extends IntegrationTest {
     void statusReportsProgressAndFailures() throws Exception {
         publicGeneral();
         choose(pub("C1", "general"));
-        assertThat(connector.status().state()).isEqualTo(State.UP);
-        assertThat(connector.status().detail()).contains("waiting for first sync");
+        assertThat(connector.status(tenant.id()).state()).isEqualTo(State.UP);
+        assertThat(connector.status(tenant.id()).detail()).contains("waiting for first sync");
 
         long run = runs.start(tenant.id(), sourceId());
         runs.finish(tenant.id(), run, "OK", new SyncCounts(1, 0, 0, 0, 0), null);
-        assertThat(connector.status().detail()).contains("0 documents, last sync");
+        assertThat(connector.status(tenant.id()).detail()).contains("0 documents, last sync");
 
         long failed = runs.start(tenant.id(), sourceId());
         runs.finish(tenant.id(), failed, "FAILED", SyncCounts.NONE, "Slack said no");
-        assertThat(connector.status().state()).isEqualTo(State.DOWN);
-        assertThat(connector.status().detail()).contains("Slack said no");
+        assertThat(connector.status(tenant.id()).state()).isEqualTo(State.DOWN);
+        assertThat(connector.status(tenant.id()).detail()).contains("Slack said no");
     }
 }

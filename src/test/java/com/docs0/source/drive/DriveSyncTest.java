@@ -65,7 +65,7 @@ class DriveSyncTest extends IntegrationTest {
         drive = new FakeDriveClient();
         connection = new DriveConnection(DriveTestSetup.props(), new TokenCipher(DriveTestSetup.ENCRYPTION_KEY),
                 sources, credentials, store);
-        connector = new DriveConnector(drive, connection, store, runs, tenants);
+        connector = new DriveConnector(drive, connection, store, runs);
         connection.connect(tenant.id(), "asha@example.com", "refresh-token");
         connection.addFolder(tenant.id(), new Folder(FakeDriveClient.MAIN, "Main"));
     }
@@ -79,7 +79,7 @@ class DriveSyncTest extends IntegrationTest {
         drive.put("md", "README.md", "text/markdown", T0, "# Readme");
         drive.put("csv", "export.csv", "text/csv", T0, "a,b\n1,2\n");
 
-        SyncRun run = syncService.run(connector).orElseThrow();
+        SyncRun run = syncService.run(tenant.id(), connector).orElseThrow();
 
         assertThat(run.status()).isEqualTo(SyncRun.OK);
         assertThat(run.counts()).isEqualTo(new SyncCounts(6, 0, 0, 0, 0));
@@ -110,16 +110,16 @@ class DriveSyncTest extends IntegrationTest {
     void unchangedFilesAreNotFetchedAgainAndChangedOnesAreUpdated() {
         drive.put("a", "Alpha", "text/plain", T0, "alpha mentions giraffes");
         drive.put("b", "Beta", "text/plain", T0, "beta body");
-        syncService.run(connector);
+        syncService.run(tenant.id(), connector);
         assertThat(drive.fetched).containsExactlyInAnyOrder("a", "b");
         drive.fetched.clear();
 
-        SyncRun unchanged = syncService.run(connector).orElseThrow();
+        SyncRun unchanged = syncService.run(tenant.id(), connector).orElseThrow();
         assertThat(unchanged.counts()).isEqualTo(SyncCounts.NONE);
         assertThat(drive.fetched).isEmpty();
 
         drive.put("a", "Alpha v2", "text/plain", T1, "alpha now mentions zebras");
-        SyncRun changed = syncService.run(connector).orElseThrow();
+        SyncRun changed = syncService.run(tenant.id(), connector).orElseThrow();
 
         assertThat(changed.counts()).isEqualTo(new SyncCounts(0, 1, 0, 0, 0));
         assertThat(drive.fetched).containsExactly("a");
@@ -134,11 +134,11 @@ class DriveSyncTest extends IntegrationTest {
     void removedFileIsMarkedDeletedLeavesSearchAndComesBackIfItReappears() {
         drive.put("keep", "Keep", "text/plain", T0, "kept walrus");
         drive.put("gone", "Gone", "text/plain", T0, "removed walrus");
-        syncService.run(connector);
+        syncService.run(tenant.id(), connector);
         assertThat(search.search(tenant.id(), ANYONE, "walrus", 8).hits()).hasSize(2);
 
         drive.remove("gone");
-        SyncRun run = syncService.run(connector).orElseThrow();
+        SyncRun run = syncService.run(tenant.id(), connector).orElseThrow();
 
         assertThat(run.counts()).isEqualTo(new SyncCounts(0, 0, 1, 0, 0));
         assertThat(search.search(tenant.id(), ANYONE, "walrus", 8).hits())
@@ -148,11 +148,11 @@ class DriveSyncTest extends IntegrationTest {
                 .isTrue();
 
         // Not removed twice.
-        assertThat(syncService.run(connector).orElseThrow().counts()).isEqualTo(SyncCounts.NONE);
+        assertThat(syncService.run(tenant.id(), connector).orElseThrow().counts()).isEqualTo(SyncCounts.NONE);
 
         // Restored from the Drive bin with the same modified time: indexed again.
         drive.put("gone", "Gone", "text/plain", T0, "removed walrus");
-        assertThat(syncService.run(connector).orElseThrow().counts()).isEqualTo(new SyncCounts(1, 0, 0, 0, 0));
+        assertThat(syncService.run(tenant.id(), connector).orElseThrow().counts()).isEqualTo(new SyncCounts(1, 0, 0, 0, 0));
         assertThat(search.search(tenant.id(), ANYONE, "walrus", 8).hits()).hasSize(2);
         assertThat(jdbc.sql("SELECT count(*) FROM document").query(Long.class).single()).isEqualTo(2);
     }
@@ -164,7 +164,7 @@ class DriveSyncTest extends IntegrationTest {
         drive.put("good", "Good", "text/plain", T0, "good okapi");
         drive.failingIds.add("bad");
 
-        SyncRun run = syncService.run(connector).orElseThrow();
+        SyncRun run = syncService.run(tenant.id(), connector).orElseThrow();
 
         assertThat(run.status()).isEqualTo(SyncRun.OK);
         assertThat(run.counts()).isEqualTo(new SyncCounts(1, 0, 0, 0, 2));
@@ -173,7 +173,7 @@ class DriveSyncTest extends IntegrationTest {
 
         // The failed file is retried on the next run and indexed once it works.
         drive.failingIds.clear();
-        SyncRun retry = syncService.run(connector).orElseThrow();
+        SyncRun retry = syncService.run(tenant.id(), connector).orElseThrow();
         assertThat(retry.counts()).isEqualTo(new SyncCounts(1, 0, 0, 0, 1));
         assertThat(search.count(tenant.id())).isEqualTo(2);
     }
@@ -181,17 +181,17 @@ class DriveSyncTest extends IntegrationTest {
     @Test
     void failedUpdateKeepsTheStoredCopyAndIsRetried() {
         drive.put("a", "Alpha", "text/plain", T0, "original okapi");
-        syncService.run(connector);
+        syncService.run(tenant.id(), connector);
 
         drive.put("a", "Alpha", "text/plain", T1, "revised okapi");
         drive.failingIds.add("a");
-        SyncRun failed = syncService.run(connector).orElseThrow();
+        SyncRun failed = syncService.run(tenant.id(), connector).orElseThrow();
 
         assertThat(failed.counts()).isEqualTo(new SyncCounts(0, 0, 0, 0, 1));
         assertThat(search.search(tenant.id(), ANYONE, "original", 8).hits()).hasSize(1);
 
         drive.failingIds.clear();
-        assertThat(syncService.run(connector).orElseThrow().counts()).isEqualTo(new SyncCounts(0, 1, 0, 0, 0));
+        assertThat(syncService.run(tenant.id(), connector).orElseThrow().counts()).isEqualTo(new SyncCounts(0, 1, 0, 0, 0));
         assertThat(search.search(tenant.id(), ANYONE, "revised", 8).hits()).hasSize(1);
     }
 
@@ -204,7 +204,7 @@ class DriveSyncTest extends IntegrationTest {
         drive.put("folder", "A folder", DriveText.FOLDER, T0, "");
         drive.put("ok", "ok.txt", "text/plain", T0, "fine");
 
-        SyncRun run = syncService.run(connector).orElseThrow();
+        SyncRun run = syncService.run(tenant.id(), connector).orElseThrow();
 
         assertThat(run.status()).isEqualTo(SyncRun.OK);
         assertThat(run.counts()).isEqualTo(new SyncCounts(2, 0, 0, 3, 0));
@@ -217,7 +217,7 @@ class DriveSyncTest extends IntegrationTest {
         drive.put("a", "Alpha", "text/plain", T0, "alpha");
         drive.put("b", "Beta", "text/plain", T0, "beta");
         drive.put("c", "Gamma", "text/plain", T0, "gamma");
-        syncService.run(connector);
+        syncService.run(tenant.id(), connector);
 
         drive.remove("c");                                              // removed
         drive.put("a", "Alpha", "text/plain", T1, "alpha changed");     // updated
@@ -225,7 +225,7 @@ class DriveSyncTest extends IntegrationTest {
         drive.put("e", "Epsilon", "text/plain", T0, "epsilon");         // failed
         drive.failingIds.add("e");
         drive.put("img", "photo.png", "image/png", T0, "");             // skipped
-        syncService.run(connector);
+        syncService.run(tenant.id(), connector);
 
         List<Map<String, Object>> rows = jdbc.sql("""
                         SELECT r.status, r.added, r.updated, r.removed, r.skipped, r.failed, r.error,
@@ -253,17 +253,17 @@ class DriveSyncTest extends IntegrationTest {
     @Test
     void failedListingFailsTheRunAndDeletesNothing() {
         drive.put("a", "Alpha", "text/plain", T0, "alpha okapi");
-        syncService.run(connector);
+        syncService.run(tenant.id(), connector);
 
         drive.listingFails = true;
-        SyncRun run = syncService.run(connector).orElseThrow();
+        SyncRun run = syncService.run(tenant.id(), connector).orElseThrow();
 
         assertThat(run.status()).isEqualTo(SyncRun.FAILED);
         assertThat(run.error()).contains("Drive is unreachable");
         assertThat(run.finishedAt()).isNotNull();
         assertThat(search.count(tenant.id())).isEqualTo(1);
 
-        ComponentStatus status = connector.status();
+        ComponentStatus status = connector.status(tenant.id());
         assertThat(status.state()).isEqualTo(State.DOWN);
         assertThat(status.detail()).contains("last sync failed").contains("Drive is unreachable");
     }
@@ -276,7 +276,7 @@ class DriveSyncTest extends IntegrationTest {
         drive.putIn("sub", "b", "In sub", "text/plain", T0, "nested okapi");
         drive.putIn("other", "c", "In other", "text/plain", T0, "unchosen okapi");
 
-        SyncRun run = syncService.run(connector).orElseThrow();
+        SyncRun run = syncService.run(tenant.id(), connector).orElseThrow();
 
         assertThat(drive.lastFolderIds).containsExactly(FakeDriveClient.MAIN);
         assertThat(run.counts()).isEqualTo(new SyncCounts(2, 0, 0, 0, 0));
@@ -284,7 +284,7 @@ class DriveSyncTest extends IntegrationTest {
                 .extracting(SearchHit::title).containsExactlyInAnyOrder("In main", "In sub");
 
         connection.addFolder(tenant.id(), new Folder("other", "Other"));
-        assertThat(syncService.run(connector).orElseThrow().counts()).isEqualTo(new SyncCounts(1, 0, 0, 0, 0));
+        assertThat(syncService.run(tenant.id(), connector).orElseThrow().counts()).isEqualTo(new SyncCounts(1, 0, 0, 0, 0));
         assertThat(drive.lastFolderIds).containsExactly(FakeDriveClient.MAIN, "other");
         assertThat(search.search(tenant.id(), ANYONE, "okapi", 8).hits()).hasSize(3);
     }
@@ -295,13 +295,13 @@ class DriveSyncTest extends IntegrationTest {
         connection.addFolder(tenant.id(), new Folder("other", "Other"));
         drive.put("a", "In main", "text/plain", T0, "main okapi");
         drive.putIn("other", "c", "In other", "text/plain", T0, "other okapi");
-        syncService.run(connector);
+        syncService.run(tenant.id(), connector);
         assertThat(search.search(tenant.id(), ANYONE, "okapi", 8).hits()).hasSize(2);
 
         connection.removeFolder(tenant.id(), "other");
         // Not before the next sync.
         assertThat(search.search(tenant.id(), ANYONE, "okapi", 8).hits()).hasSize(2);
-        SyncRun run = syncService.run(connector).orElseThrow();
+        SyncRun run = syncService.run(tenant.id(), connector).orElseThrow();
 
         assertThat(run.counts()).isEqualTo(new SyncCounts(0, 0, 1, 0, 0));
         assertThat(search.search(tenant.id(), ANYONE, "okapi", 8).hits())
@@ -312,12 +312,12 @@ class DriveSyncTest extends IntegrationTest {
     void clearingTheSelectionDropsEveryDocumentAtTheNextSyncWithoutCallingDrive() {
         drive.put("a", "Alpha", "text/plain", T0, "alpha okapi");
         drive.put("b", "Beta", "text/plain", T0, "beta okapi");
-        syncService.run(connector);
+        syncService.run(tenant.id(), connector);
         int callsBefore = drive.calls;
 
         connection.removeFolder(tenant.id(), FakeDriveClient.MAIN);
         // Leftover documents are work for the scheduler, once.
-        assertThat(connector.configured()).isTrue();
+        assertThat(connector.configured(tenant.id())).isTrue();
         scheduler(connector).syncAll();
 
         SyncRun run = runs.latest(tenant.id(), sourceId()).orElseThrow();
@@ -326,7 +326,7 @@ class DriveSyncTest extends IntegrationTest {
         assertThat(search.count(tenant.id())).isZero();
         assertThat(search.search(tenant.id(), ANYONE, "okapi", 8).hits()).isEmpty();
         assertThat(drive.calls).isEqualTo(callsBefore);
-        assertThat(connector.configured()).isFalse();
+        assertThat(connector.configured(tenant.id())).isFalse();
     }
 
     @Test
@@ -334,12 +334,12 @@ class DriveSyncTest extends IntegrationTest {
         connection.removeFolder(tenant.id(), FakeDriveClient.MAIN);
         drive.put("a", "Alpha", "text/plain", T0, "alpha okapi");
 
-        assertThat(connector.configured()).isFalse();
+        assertThat(connector.configured(tenant.id())).isFalse();
         scheduler(connector).syncAll();
         assertThat(jdbc.sql("SELECT count(*) FROM sync_run").query(Long.class).single()).isZero();
 
         // Even when asked directly, nothing is indexed and Drive is not called.
-        SyncRun run = syncService.run(connector).orElseThrow();
+        SyncRun run = syncService.run(tenant.id(), connector).orElseThrow();
         assertThat(run.status()).isEqualTo(SyncRun.OK);
         assertThat(run.counts()).isEqualTo(SyncCounts.NONE);
         assertThat(search.count(tenant.id())).isZero();
@@ -349,7 +349,7 @@ class DriveSyncTest extends IntegrationTest {
     @Test
     void scheduledSyncRunsOnceDriveIsConnectedWithAFolder() {
         drive.put("a", "Alpha", "text/plain", T0, "alpha okapi");
-        assertThat(connector.configured()).isTrue();
+        assertThat(connector.configured(tenant.id())).isTrue();
 
         scheduler(connector).syncAll();
 
@@ -360,10 +360,10 @@ class DriveSyncTest extends IntegrationTest {
     void revokedGrantFailsTheRunWithTheReconnectMessageAndDeletesNothing() {
         drive.put("a", "Alpha", "text/plain", T0, "alpha okapi");
         drive.put("b", "Beta", "text/plain", T0, "beta okapi");
-        syncService.run(connector);
+        syncService.run(tenant.id(), connector);
 
         drive.revoked = true;
-        SyncRun run = syncService.run(connector).orElseThrow();
+        SyncRun run = syncService.run(tenant.id(), connector).orElseThrow();
 
         assertThat(run.status()).isEqualTo(SyncRun.FAILED);
         assertThat(run.error())
@@ -373,7 +373,7 @@ class DriveSyncTest extends IntegrationTest {
         assertThat(search.search(tenant.id(), ANYONE, "okapi", 8).hits()).hasSize(2);
         assertThat(jdbc.sql("SELECT count(*) FROM document WHERE deleted").query(Long.class).single()).isZero();
 
-        ComponentStatus status = connector.status();
+        ComponentStatus status = connector.status(tenant.id());
         assertThat(status.state()).isEqualTo(State.DOWN);
         assertThat(status.detail()).contains("last sync failed").contains("Reconnect Google Drive");
     }
@@ -381,7 +381,7 @@ class DriveSyncTest extends IntegrationTest {
     @Test
     void grantRevokedWhileFetchingFilesFailsTheRunInsteadOfCountingEveryFileAsFailed() {
         drive.put("a", "Alpha", "text/plain", T0, "alpha okapi");
-        syncService.run(connector);
+        syncService.run(tenant.id(), connector);
         // Listing still works; the first download is refused.
         FakeDriveClient refusing = new FakeDriveClient() {
             @Override
@@ -391,7 +391,7 @@ class DriveSyncTest extends IntegrationTest {
         };
         refusing.put("b", "Beta", "text/plain", T0, "beta okapi");
 
-        SyncRun run = syncService.run(new DriveConnector(refusing, connection, store, runs, tenants)).orElseThrow();
+        SyncRun run = syncService.run(tenant.id(), new DriveConnector(refusing, connection, store, runs)).orElseThrow();
 
         assertThat(run.status()).isEqualTo(SyncRun.FAILED);
         assertThat(run.error()).isEqualTo(GoogleDriveClient.RECONNECT_MESSAGE);
@@ -403,7 +403,7 @@ class DriveSyncTest extends IntegrationTest {
     @Test
     void disconnectDeletesTheGrantAndHidesTheDocuments() {
         drive.put("a", "Alpha", "text/plain", T0, "alpha okapi");
-        syncService.run(connector);
+        syncService.run(tenant.id(), connector);
         assertThat(search.count(tenant.id())).isEqualTo(1);
 
         connection.disconnect(tenant.id());
@@ -412,13 +412,13 @@ class DriveSyncTest extends IntegrationTest {
         assertThat(connection.credential(tenant.id())).isEmpty();
         assertThat(search.count(tenant.id())).isZero();
         assertThat(search.search(tenant.id(), ANYONE, "okapi", 8).hits()).isEmpty();
-        assertThat(connector.configured()).isFalse();
-        assertThat(connector.status().state()).isEqualTo(State.OFF);
+        assertThat(connector.configured(tenant.id())).isFalse();
+        assertThat(connector.status(tenant.id()).state()).isEqualTo(State.OFF);
 
         // Connecting again keeps the folder selection; the next sync brings the documents back.
         connection.connect(tenant.id(), "asha@example.com", "refresh-token-2");
         assertThat(connection.folders(tenant.id())).containsExactly(new Folder(FakeDriveClient.MAIN, "Main"));
-        assertThat(syncService.run(connector).orElseThrow().counts()).isEqualTo(new SyncCounts(1, 0, 0, 0, 0));
+        assertThat(syncService.run(tenant.id(), connector).orElseThrow().counts()).isEqualTo(new SyncCounts(1, 0, 0, 0, 0));
         assertThat(search.count(tenant.id())).isEqualTo(1);
     }
 
@@ -469,19 +469,19 @@ class DriveSyncTest extends IntegrationTest {
     void statusIsOffWhenNotConnected() {
         connection.disconnect(tenant.id());
 
-        assertThat(connector.status()).isEqualTo(unconnected.status());
-        assertThat(connector.status().name()).isEqualTo("Google Drive");
-        assertThat(connector.status().state()).isEqualTo(State.OFF);
-        assertThat(connector.status().detail()).isEqualTo("not connected — connect it on the Sources page");
-        assertThat(connector.configured()).isFalse();
-        assertThat(unconnected.configured()).isFalse();
+        assertThat(connector.status(tenant.id())).isEqualTo(unconnected.status(tenant.id()));
+        assertThat(connector.status(tenant.id()).name()).isEqualTo("Google Drive");
+        assertThat(connector.status(tenant.id()).state()).isEqualTo(State.OFF);
+        assertThat(connector.status(tenant.id()).detail()).isEqualTo("not connected — connect it on the Sources page");
+        assertThat(connector.configured(tenant.id())).isFalse();
+        assertThat(unconnected.configured(tenant.id())).isFalse();
     }
 
     @Test
     void statusIsOffWhenConnectedButNoFoldersAreChosen() {
         connection.removeFolder(tenant.id(), FakeDriveClient.MAIN);
 
-        ComponentStatus status = connector.status();
+        ComponentStatus status = connector.status(tenant.id());
 
         assertThat(status.name()).isEqualTo("Google Drive");
         assertThat(status.state()).isEqualTo(State.OFF);
@@ -490,15 +490,15 @@ class DriveSyncTest extends IntegrationTest {
 
     @Test
     void statusIsUpBeforeAndAfterASuccessfulSyncWithoutCallingDrive() {
-        assertThat(connector.status().state()).isEqualTo(State.UP);
-        assertThat(connector.status().detail()).isEqualTo("connected as asha@example.com, waiting for first sync");
+        assertThat(connector.status(tenant.id()).state()).isEqualTo(State.UP);
+        assertThat(connector.status(tenant.id()).detail()).isEqualTo("connected as asha@example.com, waiting for first sync");
 
         drive.put("a", "Alpha", "text/plain", T0, "alpha");
         drive.put("b", "Beta", "text/plain", T0, "beta");
-        syncService.run(connector);
+        syncService.run(tenant.id(), connector);
         int callsBefore = drive.calls;
 
-        ComponentStatus status = connector.status();
+        ComponentStatus status = connector.status(tenant.id());
 
         assertThat(status.state()).isEqualTo(State.UP);
         assertThat(status.detail()).startsWith("2 documents, last sync ");
@@ -510,14 +510,14 @@ class DriveSyncTest extends IntegrationTest {
         DriveConnection keyless = new DriveConnection(DriveTestSetup.props(), new TokenCipher(""), sources,
                 credentials, store);
 
-        ComponentStatus status = new DriveConnector(drive, keyless, store, runs, tenants).status();
+        ComponentStatus status = new DriveConnector(drive, keyless, store, runs).status(tenant.id());
 
         assertThat(status.state()).isEqualTo(State.DOWN);
         assertThat(status.detail()).contains("DOCS0_ENCRYPTION_KEY");
     }
 
     private SyncScheduler scheduler(DriveConnector driveConnector) {
-        return new SyncScheduler(syncService, List.<com.docs0.source.SourceConnector>of(driveConnector), DriveTestSetup.props());
+        return new SyncScheduler(syncService, List.<com.docs0.source.SourceConnector>of(driveConnector), DriveTestSetup.props(), tenants);
     }
 
     private long sourceId() {

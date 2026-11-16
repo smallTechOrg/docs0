@@ -13,7 +13,14 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ConcurrentHashMap;
 
 /** An in-memory Slack workspace for the history tests. Records what was asked. */
-public final class FakeSlack implements SlackMessenger {
+public final class FakeSlack implements SlackMessenger, com.docs0.slack.SlackMessengers {
+
+    /** A single-workspace fake: every tenant talks to this one workspace. */
+    @Override
+    public SlackMessenger forTenant(long tenantId) {
+        return workspaces.getOrDefault(tenantId, this);
+    }
+
 
     public static final String BOT = "UBOT";
 
@@ -36,6 +43,15 @@ public final class FakeSlack implements SlackMessenger {
     public volatile boolean listFails;
 
     public volatile java.util.Set<String> scopes = Set.of();
+
+    /** Tenants that have a workspace of their own; every other tenant talks to this one. */
+    private final Map<Long, SlackMessenger> workspaces = new ConcurrentHashMap<>();
+
+    /** Gives a tenant its own workspace, for tests with two companies. */
+    public FakeSlack workspaceFor(long tenantId, SlackMessenger workspace) {
+        workspaces.put(tenantId, workspace);
+        return this;
+    }
 
     /** Back to an empty workspace, for tests that share one instance. */
     public void reset() {
@@ -60,6 +76,7 @@ public final class FakeSlack implements SlackMessenger {
         dmsOpened.clear();
         sent.clear();
         scopes = Set.of();
+        workspaces.clear();
     }
 
     // ---- building the workspace ----

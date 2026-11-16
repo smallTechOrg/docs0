@@ -4,7 +4,6 @@ import com.docs0.conversation.InteractionRepository;
 import com.docs0.conversation.InteractionRepository.Logged;
 import com.docs0.feedback.FeedbackRepository;
 import com.docs0.feedback.FeedbackRepository.Rating;
-import com.docs0.tenant.TenantService;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
@@ -26,25 +25,23 @@ public class ReactionHandler {
     private static final Logger log = LoggerFactory.getLogger(ReactionHandler.class);
     private static final CompletableFuture<Void> DONE = CompletableFuture.completedFuture(null);
 
-    private final TenantService tenants;
     private final InteractionRepository interactions;
     private final FeedbackRepository feedback;
-    private final SlackMessenger messenger;
+    private final SlackMessengers messengers;
     private final ExecutorService workers = Executors.newVirtualThreadPerTaskExecutor();
 
-    public ReactionHandler(TenantService tenants, InteractionRepository interactions, FeedbackRepository feedback,
-            SlackMessenger messenger) {
-        this.tenants = tenants;
+    public ReactionHandler(InteractionRepository interactions, FeedbackRepository feedback,
+            SlackMessengers messengers) {
         this.interactions = interactions;
         this.feedback = feedback;
-        this.messenger = messenger;
+        this.messengers = messengers;
     }
 
     /**
      * Handles one reaction. Cheap and non-blocking: safe to call on the Slack event thread.
      * The returned future never completes exceptionally.
      */
-    public CompletableFuture<Void> handle(ReactionEvent event) {
+    public CompletableFuture<Void> handle(long tenantId, ReactionEvent event) {
         if (event == null || isBlank(event.channel()) || isBlank(event.user()) || isBlank(event.itemTs())) {
             return DONE;
         }
@@ -54,7 +51,7 @@ public class ReactionHandler {
         }
         return CompletableFuture.runAsync(() -> {
             try {
-                process(event, rating);
+                process(tenantId, event, rating);
             } catch (Exception e) {
                 log.warn("Reaction could not be handled: channel={} error={}", event.channel(),
                         e instanceof SlackMessenger.SlackCallException slack ? slack.code() : e.getClass().getName());
@@ -76,11 +73,10 @@ public class ReactionHandler {
         };
     }
 
-    private void process(ReactionEvent event, Rating rating) {
-        if (event.user().equals(botUserId())) {
+    private void process(long tenantId, ReactionEvent event, Rating rating) {
+        if (event.user().equals(botUserId(tenantId))) {
             return;
         }
-        long tenantId = tenants.current().id();
         Optional<Logged> answer = interactions.findByAnswerTs(tenantId, event.channel(), event.itemTs());
         if (answer.isEmpty()) {
             return;
@@ -95,7 +91,7 @@ public class ReactionHandler {
         log.info("Reaction recorded: tenant={} interaction={} rating={}", tenantId, logged.id(), rating);
         if (rating == Rating.DOWN && feedback.createPrompt(tenantId, logged.conversationId(), logged.id())) {
             try {
-                messenger.postMessage(event.channel(), logged.threadTs().isEmpty() ? null : logged.threadTs(),
+                messengers.forTenant(tenantId).postMessage(event.channel(), logged.threadTs().isEmpty() ? null : logged.threadTs(),
                         PROMPT, null);
             } catch (RuntimeException e) {
                 // Not posted: forget the prompt so the next thumbs down can ask again.
@@ -105,9 +101,9 @@ public class ReactionHandler {
         }
     }
 
-    private String botUserId() {
+    private String botUserId(long tenantId) {
         try {
-            return messenger.botUserId();
+            return messengers.forTenant(tenantId).botUserId();
         } catch (Exception e) {
             return null;
         }

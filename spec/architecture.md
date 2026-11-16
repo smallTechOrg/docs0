@@ -30,7 +30,9 @@ NOTES.md                        build journal (harness friction only)
 src/main/java/com/docs0/
   Docs0Application.java
   config/                       typed settings (Docs0Properties), .env loading, beans
-  tenant/                       Tenant, TenantRepository, bootstrap of the first tenant
+  tenant/                       Tenant, TenantService (create/find/suspend)
+  tenant/local/                 single-tenant compatibility layer: the configured tenant, the password/loopback
+                                admin sign-in and the Socket Mode pilot registration (nothing else may use it)
   knowledge/                    Document model, DocumentRepository (upsert, search, read)
   source/                       SourceConnector SPI, SyncService, SyncRun log
   source/drive/                 DriveClient, DriveConnector, text extraction
@@ -41,7 +43,8 @@ src/main/java/com/docs0/
   budget/                       BudgetService: hard monthly spend cap
   agent/                        AgentService (tool loop), tools, AnswerVerifier, LlmClient
   conversation/                 Conversation + Interaction log
-  slack/                        SlackGateway (Bolt app), event handlers, message rendering
+  slack/                        SlackGateway (Bolt app), event handlers, message rendering, SlackWorkspaces
+                                (workspace registry) and SlackMessengers (a Slack client per tenant)
   web/                          /health, status page
   web/admin/                    admin guard, Sources page (connect Drive, pick folders, sync now)
   crypto/                       TokenCipher (AES-GCM for stored grants)
@@ -55,7 +58,12 @@ src/test/java/com/docs0/        mirrors main
 ## Conventions
 
 - **Tenant scoping.** Every table except `tenant` has `tenant_id NOT NULL`. Every
-  repository method takes a tenant id; no query runs without it.
+  repository and service method takes a tenant id explicitly; no query runs without it, and there is no
+  ambient "current tenant" (see [Tenant resolution](#tenant-resolution-phase-7a)). Every statement carries
+  `tenant_id` in its `WHERE`/`JOIN`, and ids that arrive from a user (document, correction, draft, source,
+  channel ids) are only ever looked up together with the caller's tenant id, so another tenant's id behaves
+  like an id that does not exist. As a backstop, V8 adds composite foreign keys `(child_id, tenant_id) ->
+  (parent id, tenant_id)` so the database itself refuses a row that points at another tenant's row.
 - **Config.** All settings come from env vars prefixed `DOCS0_`, bound to
   `Docs0Properties`. A `.env` file at the repo root is loaded at startup if present. Never
   read `.env` in tests or print a secret.
@@ -74,7 +82,9 @@ src/test/java/com/docs0/        mirrors main
 
 ## Data model (Phase 1)
 
-- `tenant(id, slug, name, slack_team_id, created_at)`
+- `tenant(id, slug, name, slack_team_id, created_at, monthly_budget_usd, status, admin_emails)` — the last
+  three are Phase 7a: the tenant's own monthly cap (null: the global default), `ACTIVE|SUSPENDED`, and a
+  comma-separated list of admins (used by Phase 7b).
 - `source(id, tenant_id, kind, name, config jsonb, visibility, created_at)` — `kind` is
   `GOOGLE_DRIVE` in Phase 1; its `config` holds the chosen folders as
   `{"folders":[{"id":"…","name":"…"}]}`. `visibility` is `SHARED` or `RESTRICTED`.
@@ -167,3 +177,54 @@ source-kind filter), `findById` and `recent`; a hidden document leaves no hit, s
 existence signal, and `findById` of a hidden id is empty exactly like a missing id. `count` stays
 tenant-wide. `AgentService`, `KnowledgeTools` and `AnswerVerifier` pass the request's audience to every
 call, so the verifier cannot confirm a quote from a document the audience cannot see.
+
+## Tenant resolution (Phase 7a)
+
+One deployment serves many companies. Nothing looks a tenant up globally: the tenant is established once, at
+the edge of each kind of work, and passed down as an explicit `tenantId` argument (a plain parameter rather
+than a thread-local or request-scoped holder, so code cannot run for a tenant nobody named).
+
+| Work | Where the tenant comes from |
+|---|---|
+| An admin request (`/admin/**`) | `AdminGuard` asks the one `AdminAuthenticator` who is signed in. It returns an `AdminPrincipal(tenantId, displayName)`, stored on the request; controllers receive it as a method parameter. Today the only authenticator is the pilot's `LocalAdminAuthenticator` (DOCS0_ADMIN_PASSWORD over HTTP Basic, or loopback when no password is set), which maps to the configured tenant. Other sign-ins plug in behind the same interface. |
+| A Slack event, reaction or button click | The payload's workspace (`team_id`). `SlackGateway` looks it up in `SlackWorkspaces.byTeamId` and calls the handler with that tenant id; an event from a workspace nobody registered is ignored (only the team id is logged). Handlers never read a tenant from anywhere else. |
+| A scheduled job (`SyncScheduler`, startup sync, weekly digest) | Loops over `TenantService.active()`. Each tenant, and within it each configured connector, is tried on its own, so one failure never stops the rest. A suspended tenant is skipped. |
+| `/` and `/health` | The configured local tenant only (`LocalTenantResolver`), as before. They never show another tenant's name or counts. |
+
+`StatusContributor.status(tenantId)` and `SourceConnector.configured(tenantId)` take the tenant they report on;
+global components (the database, the model) ignore it.
+
+`tenant/local` is the single-tenant compatibility layer: `LocalTenantResolver` (configured `docs0.tenant.*` to a
+tenant), `LocalAdminAuthenticator` and `LocalSlackPilot` (the Socket Mode registration below). Only
+`SlackGateway` and `StatusController` use it, by design; a test fails if anything else does, or if any code calls
+a "current tenant" lookup.
+
+### Slack workspace registry
+
+`slack_installation(id, tenant_id UNIQUE, slack_team_id UNIQUE, team_name, encrypted_bot_token, bot_user_id,
+installed_by, scopes, created_at, updated_at)`: one workspace per tenant and one tenant per workspace. The bot
+token is AES-256-GCM encrypted with `DOCS0_ENCRYPTION_KEY`, decrypted only to build a client, and never logged.
+
+- `SlackWorkspaces`: `byTeamId`, `forTenant`, `register`, `botToken`.
+- `SlackMessengers.forTenant(tenantId)`: the `SlackMessenger` for that tenant's workspace (a `BoltSlackMessenger`
+  on the tenant's own token), cached per tenant and rebuilt when the tenant is registered again. Every class that
+  talks to Slack (question, reaction and draft handlers, corrections, identities, proactive answers, stale-document
+  pings, the digest, Slack history, the admin pages) gets its messenger through it. There is no client with a
+  global token.
+- Pilot: at startup `SlackGateway` calls `auth.test` with `DOCS0_SLACK_BOT_TOKEN` (retrying as before, never
+  crashing startup) and registers the result for the configured tenant. From then on the pilot is routed through
+  the same registry as any other workspace. This needs `DOCS0_ENCRYPTION_KEY`.
+- In-memory state is keyed by tenant: event de-duplication, per-conversation queues, identity-scope warnings,
+  Slack-history name caches and skip notes. Slack ids (channels, threads, users) are only unique within a
+  workspace.
+
+### Per-tenant limits and settings
+
+- `BudgetService.monthlyCap(tenantId)`: the tenant's own `monthly_budget_usd` when it is positive, else the
+  global `DOCS0_MONTHLY_BUDGET_USD`. The cap is checked where it always was (questions, repeat-question answers,
+  themes, the digest).
+- `status = SUSPENDED`: questions are refused politely, draft buttons do nothing, and syncs and scheduled jobs
+  skip the tenant.
+- `TenantService` creates and finds tenants by id, slug and Slack team id. The first tenant stays `smalltech`,
+  created from configuration.
+

@@ -71,7 +71,7 @@ class GmailAccessTest extends IntegrationTest {
         connection.connect(tenant.id(), new GmailKey(TestKeys.EMAIL, TestKeys.CLIENT_ID), FakeGmailClient.KEY);
         connection.setMailboxes(tenant.id(), List.of(new Mailbox("ana@example.com", List.of()),
                 new Mailbox("support@example.com", List.of("lee@example.com"))));
-        GmailConnector connector = new GmailConnector(gmail, connection, store, runs, tenants, 90);
+        GmailConnector connector = new GmailConnector(gmail, connection, store, runs, 90);
         connector.sync(tenant.id(), connection.source(tenant.id()).orElseThrow().id());
         mailId = id("gmail:ana@example.com:t1");
         supportId = id("gmail:support@example.com:s1");

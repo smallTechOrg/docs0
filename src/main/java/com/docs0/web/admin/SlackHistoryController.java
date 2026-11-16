@@ -1,6 +1,7 @@
 package com.docs0.web.admin;
 
 import com.docs0.slack.SlackMessenger;
+import com.docs0.slack.SlackMessengers;
 import com.docs0.slack.SlackMessenger.ChannelInfo;
 import com.docs0.slack.SlackMessenger.SlackMessage;
 import com.docs0.source.Source;
@@ -8,7 +9,6 @@ import com.docs0.source.SyncService;
 import com.docs0.source.slack.SlackChannel;
 import com.docs0.source.slack.SlackHistoryConnection;
 import com.docs0.source.slack.SlackHistoryConnector;
-import com.docs0.tenant.TenantService;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -35,31 +35,29 @@ public class SlackHistoryController {
     /** Check access stops counting here; the page then shows "2,000+". */
     static final int CHECK_CAP = 2000;
 
-    private final TenantService tenants;
     private final SlackHistoryConnection connection;
     private final SlackHistoryConnector connector;
     private final SlackHistoryPanel panel;
-    private final SlackMessenger messenger;
+    private final SlackMessengers messengers;
     private final SyncService syncService;
 
-    public SlackHistoryController(TenantService tenants, SlackHistoryConnection connection,
+    public SlackHistoryController(SlackHistoryConnection connection,
                                   SlackHistoryConnector connector, SlackHistoryPanel panel,
-                                  SlackMessenger messenger, SyncService syncService) {
-        this.tenants = tenants;
+                                  SlackMessengers messengers, SyncService syncService) {
         this.connection = connection;
         this.connector = connector;
         this.panel = panel;
-        this.messenger = messenger;
+        this.messengers = messengers;
         this.syncService = syncService;
     }
 
     @PostMapping(BASE + "/channels")
-    public RedirectView save(@RequestParam(name = "choice", required = false) List<String> choice,
+    public RedirectView save(AdminPrincipal admin, @RequestParam(name = "choice", required = false) List<String> choice,
                              RedirectAttributes flash) {
-        if (!panel.botTokenSet()) {
+        long tenantId = admin.tenantId();
+        if (!panel.workspaceConnected(tenantId)) {
             return failed(flash, "Set DOCS0_SLACK_BOT_TOKEN first. See the README.");
         }
-        long tenantId = tenants.current().id();
         Set<String> wanted = choice == null ? Set.of() : Set.copyOf(choice);
         List<SlackChannel> chosen = new ArrayList<>();
         try {
@@ -88,10 +86,10 @@ public class SlackHistoryController {
     }
 
     @PostMapping(BASE + "/check")
-    public RedirectView check(RedirectAttributes flash) {
-        long tenantId = tenants.current().id();
+    public RedirectView check(AdminPrincipal admin, RedirectAttributes flash) {
+        long tenantId = admin.tenantId();
         List<SlackChannel> chosen = connection.channels(tenantId);
-        if (!panel.botTokenSet() || chosen.isEmpty()) {
+        if (!panel.workspaceConnected(tenantId) || chosen.isEmpty()) {
             return failed(flash, "Choose at least one channel first.");
         }
         Instant since = Instant.now().minus(Duration.ofDays(CHECK_DAYS));
@@ -114,7 +112,7 @@ public class SlackHistoryController {
                 continue;
             }
             try {
-                List<SlackMessage> messages = messenger.history(info.id(), since);
+                List<SlackMessage> messages = messengers.forTenant(admin.tenantId()).history(info.id(), since);
                 long threads = messages.stream().filter(m -> m.replyCount() > 0).count();
                 lines.add("#" + channel.name() + ": " + describe(messages.size(), "message") + ", "
                         + describe((int) threads, "thread") + " in the last " + CHECK_DAYS + " days");
@@ -129,17 +127,17 @@ public class SlackHistoryController {
     }
 
     @PostMapping(BASE + "/sync")
-    public RedirectView sync(RedirectAttributes flash) {
-        if (!panel.botTokenSet()) {
+    public RedirectView sync(AdminPrincipal admin, RedirectAttributes flash) {
+        long tenantId = admin.tenantId();
+        if (!panel.workspaceConnected(tenantId)) {
             return failed(flash, "Set DOCS0_SLACK_BOT_TOKEN first. See the README.");
         }
-        long tenantId = tenants.current().id();
         Optional<Source> source = connection.source(tenantId);
         if (connection.channels(tenantId).isEmpty() && source.isEmpty()) {
             return failed(flash, "Choose at least one channel first.");
         }
         panel.forget(tenantId);
-        if (!syncService.startInBackground(connector)) {
+        if (!syncService.startInBackground(admin.tenantId(), connector)) {
             flash.addFlashAttribute("notice", "A Slack history sync is already running.");
         }
         return to();

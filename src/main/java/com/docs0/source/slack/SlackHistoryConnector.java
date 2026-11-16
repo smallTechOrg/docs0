@@ -6,6 +6,7 @@ import com.docs0.knowledge.DocumentStore.DocumentWrite;
 import com.docs0.knowledge.DocumentStore.Stored;
 import com.docs0.slack.IdentityService;
 import com.docs0.slack.SlackMessenger;
+import com.docs0.slack.SlackMessengers;
 import com.docs0.slack.SlackMessenger.ChannelInfo;
 import com.docs0.slack.SlackMessenger.SlackCallException;
 import com.docs0.slack.SlackMessenger.SlackMessage;
@@ -16,7 +17,6 @@ import com.docs0.source.SyncCounts;
 import com.docs0.source.SyncRun;
 import com.docs0.source.SyncRunRepository;
 import com.docs0.source.slack.SlackHistoryRender.Rendered;
-import com.docs0.tenant.TenantService;
 import com.docs0.web.StatusContributor;
 import java.time.Clock;
 import java.time.Duration;
@@ -61,38 +61,30 @@ public class SlackHistoryConnector implements SourceConnector, StatusContributor
     private static final int MAX_STATUS_ERROR_CHARS = 120;
     private static final Duration NAME_BUDGET = Duration.ofSeconds(30);
 
-    private final SlackMessenger messenger;
+    private final SlackMessengers messengers;
     private final IdentityService identities;
     private final SlackHistoryConnection connection;
     private final DocumentStore documents;
     private final SyncRunRepository runs;
-    private final TenantService tenants;
-    private final boolean tokenSet;
     private final int days;
     private final Clock clock;
     /** Channel id -> why it was skipped in the last run, for the Sources page. */
-    private volatile Map<String, String> notes = Map.of();
+    private final Map<Long, Map<String, String>> notes = new java.util.concurrent.ConcurrentHashMap<>();
 
     @Autowired
-    public SlackHistoryConnector(SlackMessenger messenger, IdentityService identities,
+    public SlackHistoryConnector(SlackMessengers messengers, IdentityService identities,
                                  SlackHistoryConnection connection, DocumentStore documents, SyncRunRepository runs,
-                                 TenantService tenants, Docs0Properties props,
                                  @Value("${docs0.slack-history.days:180}") int days) {
-        this(messenger, identities, connection, documents, runs, tenants,
-                props.slack() != null && props.slack().botToken() != null && !props.slack().botToken().isBlank(),
-                days, Clock.systemUTC());
+        this(messengers, identities, connection, documents, runs, days, Clock.systemUTC());
     }
 
-    SlackHistoryConnector(SlackMessenger messenger, IdentityService identities, SlackHistoryConnection connection,
-                          DocumentStore documents, SyncRunRepository runs, TenantService tenants, boolean tokenSet,
-                          int days, Clock clock) {
-        this.messenger = messenger;
+    SlackHistoryConnector(SlackMessengers messengers, IdentityService identities, SlackHistoryConnection connection,
+                          DocumentStore documents, SyncRunRepository runs, int days, Clock clock) {
+        this.messengers = messengers;
         this.identities = identities;
         this.connection = connection;
         this.documents = documents;
         this.runs = runs;
-        this.tenants = tenants;
-        this.tokenSet = tokenSet;
         this.days = Math.max(1, days);
         this.clock = clock;
     }
@@ -114,11 +106,10 @@ public class SlackHistoryConnector implements SourceConnector, StatusContributor
 
     /** True when the bot token is set and channels are chosen, or documents remain from an earlier choice. */
     @Override
-    public boolean configured() {
-        if (!tokenSet) {
+    public boolean configured(long tenantId) {
+        if (!messengers.connected(tenantId)) {
             return false;
         }
-        long tenantId = tenants.current().id();
         Optional<Source> source = connection.source(tenantId);
         if (source.isEmpty()) {
             return false;
@@ -126,9 +117,9 @@ public class SlackHistoryConnector implements SourceConnector, StatusContributor
         return !connection.channels(tenantId).isEmpty() || documents.count(tenantId, source.get().id()) > 0;
     }
 
-    /** Why channels were skipped in the last run, by channel id (for example "invite @docs0 to #name"). */
-    public Map<String, String> notes() {
-        return notes;
+    /** Why this tenant's channels were skipped in its last run, by channel id (for example "invite @docs0 to #name"). */
+    public Map<String, String> notes(long tenantId) {
+        return notes.getOrDefault(tenantId, Map.of());
     }
 
     /** What one run has done so far. */
@@ -142,11 +133,12 @@ public class SlackHistoryConnector implements SourceConnector, StatusContributor
 
     @Override
     public SyncCounts sync(long tenantId, long sourceId) throws SourceAccessException {
-        if (!tokenSet) {
-            throw new SourceAccessException("Slack is not connected. Set DOCS0_SLACK_BOT_TOKEN and restart docs0.");
+        if (!messengers.connected(tenantId)) {
+            throw new SourceAccessException("Slack is not connected for this company. Set DOCS0_SLACK_BOT_TOKEN and restart docs0.");
         }
+        SlackMessenger messenger = messengers.forTenant(tenantId);
         Instant now = clock.instant();
-        nameCache.clear();
+        nameCache.keySet().removeIf(key -> key.tenantId() == tenantId);
         List<SlackChannel> selected = connection.channels(tenantId);
         Map<String, Stored> stored = documents.stored(tenantId, sourceId);
         Tally tally = new Tally();
@@ -182,13 +174,13 @@ public class SlackHistoryConnector implements SourceConnector, StatusContributor
                     tally.removed += removeChannel(tenantId, sourceId, stored, channel.id());
                     continue;
                 }
-                if (!info.member() && !join(info, newNotes, tally)) {
+                if (!info.member() && !join(messenger, info, newNotes, tally)) {
                     continue;
                 }
                 boolean channelHasDocs = stored.keySet().stream().anyMatch(id -> channelOf(id).equals(channel.id()));
                 Instant from = fullPass || !channelHasDocs ? retentionStart
                         : max(incrementalStart, retentionStart);
-                syncChannel(tenantId, sourceId, info, ownBot, from, retentionStart, stored, tally);
+                syncChannel(messenger, tenantId, sourceId, info, ownBot, from, retentionStart, stored, tally);
             } catch (RuntimeException e) {
                 tally.failed++;
                 log.warn("Slack channel {} could not be synced: {}", channel.id(), describe(e));
@@ -205,12 +197,12 @@ public class SlackHistoryConnector implements SourceConnector, StatusContributor
         for (String channelId : leftovers) {
             tally.removed += removeChannel(tenantId, sourceId, stored, channelId);
         }
-        notes = Map.copyOf(newNotes);
+        notes.put(tenantId, Map.copyOf(newNotes));
         return new SyncCounts(tally.added, tally.updated, tally.removed, tally.skipped, tally.failed);
     }
 
     /** Joins a public channel the bot is not in. False (and the channel is skipped) when that is not possible. */
-    private boolean join(ChannelInfo info, Map<String, String> newNotes, Tally tally) {
+    private boolean join(SlackMessenger messenger, ChannelInfo info, Map<String, String> newNotes, Tally tally) {
         if (info.isPrivate()) {
             newNotes.put(info.id(), "invite @docs0 to #" + info.name());
             tally.skipped++;
@@ -227,7 +219,7 @@ public class SlackHistoryConnector implements SourceConnector, StatusContributor
         }
     }
 
-    private void syncChannel(long tenantId, long sourceId, ChannelInfo info, String ownBot, Instant from,
+    private void syncChannel(SlackMessenger messenger, long tenantId, long sourceId, ChannelInfo info, String ownBot, Instant from,
                              Instant retentionStart, Map<String, Stored> stored, Tally tally) {
         String channelId = info.id();
         boolean restricted = info.isPrivate();
@@ -295,7 +287,7 @@ public class SlackHistoryConnector implements SourceConnector, StatusContributor
         }
 
         for (Rendered rendered : wanted.values()) {
-            write(tenantId, sourceId, info, rendered, restricted, principals, stored, tally);
+            write(messenger, tenantId, sourceId, info, rendered, restricted, principals, stored, tally);
         }
 
         // A document in the part of the window that was read, or past the retention limit, that was not
@@ -310,7 +302,7 @@ public class SlackHistoryConnector implements SourceConnector, StatusContributor
         tally.removed += documents.markDeleted(tenantId, sourceId, gone);
     }
 
-    private void write(long tenantId, long sourceId, ChannelInfo info, Rendered rendered, boolean restricted,
+    private void write(SlackMessenger messenger, long tenantId, long sourceId, ChannelInfo info, Rendered rendered, boolean restricted,
                        Set<String> principals, Map<String, Stored> stored, Tally tally) {
         DocumentWrite doc = rendered.doc();
         Stored old = stored.get(doc.externalId());
@@ -318,7 +310,7 @@ public class SlackHistoryConnector implements SourceConnector, StatusContributor
             return;
         }
         try {
-            String url = old != null && old.url() != null ? old.url() : permalink(info.id(), rendered.firstTs());
+            String url = old != null && old.url() != null ? old.url() : permalink(messenger, info.id(), rendered.firstTs());
             DocumentWrite withUrl = new DocumentWrite(doc.externalId(), doc.title(), doc.mimeType(), url,
                     doc.ownerName(), doc.ownerEmail(), doc.modifiedAt(), doc.body());
             if (restricted) {
@@ -338,7 +330,7 @@ public class SlackHistoryConnector implements SourceConnector, StatusContributor
     }
 
     /** A link to the first message, or to the channel when Slack will not give one. */
-    private String permalink(String channelId, String ts) {
+    private String permalink(SlackMessenger messenger, String channelId, String ts) {
         try {
             String link = messenger.permalink(channelId, ts);
             if (link != null && !link.isBlank()) {
@@ -379,20 +371,23 @@ public class SlackHistoryConnector implements SourceConnector, StatusContributor
     }
 
     /** Names for the authors of these messages, looked up once and remembered for the run. */
-    private final Map<String, Optional<String>> nameCache = new java.util.concurrent.ConcurrentHashMap<>();
+    private record NameKey(long tenantId, String user) {}
+
+    /** Slack user ids are only unique within a workspace, so the tenant is part of the key. */
+    private final Map<NameKey, Optional<String>> nameCache = new java.util.concurrent.ConcurrentHashMap<>();
 
     private Function<String, String> names(long tenantId, List<SlackMessage> messages) {
         Set<String> ids = new LinkedHashSet<>();
         for (SlackMessage m : messages) {
-            if (m.user() != null && !m.user().isBlank() && !nameCache.containsKey(m.user())) {
+            if (m.user() != null && !m.user().isBlank() && !nameCache.containsKey(new NameKey(tenantId, m.user()))) {
                 ids.add(m.user());
             }
         }
         if (!ids.isEmpty()) {
             identities.resolve(tenantId, ids, NAME_BUDGET); // warms the cache in bulk
         }
-        return id -> nameCache.computeIfAbsent(id, i ->
-                identities.person(tenantId, i).map(IdentityService.Person::displayName)
+        return id -> nameCache.computeIfAbsent(new NameKey(tenantId, id), key ->
+                identities.person(tenantId, id).map(IdentityService.Person::displayName)
                         .filter(n -> !n.isBlank())).orElse(null);
     }
 
@@ -440,11 +435,10 @@ public class SlackHistoryConnector implements SourceConnector, StatusContributor
 
     /** Reads only the database; never calls Slack. */
     @Override
-    public ComponentStatus status() {
-        if (!tokenSet) {
+    public ComponentStatus status(long tenantId) {
+        if (!messengers.connected(tenantId)) {
             return ComponentStatus.off(NAME, "no Slack bot token configured");
         }
-        long tenantId = tenants.current().id();
         Optional<Source> source = connection.source(tenantId);
         if (source.isEmpty() || connection.channels(tenantId).isEmpty()) {
             return ComponentStatus.off(NAME, "nothing chosen yet — pick channels on the Sources page");
@@ -462,7 +456,8 @@ public class SlackHistoryConnector implements SourceConnector, StatusContributor
         if (SyncRun.RUNNING.equals(run.status())) {
             return ComponentStatus.up(NAME, count + " documents, sync in progress");
         }
-        String skipped = notes.isEmpty() ? "" : ", " + notes.size() + " channels skipped";
+        Map<String, String> skippedNotes = notes(tenantId);
+        String skipped = skippedNotes.isEmpty() ? "" : ", " + skippedNotes.size() + " channels skipped";
         return ComponentStatus.up(NAME, count + " documents, last sync " + run.finishedAt().truncatedTo(ChronoUnit.SECONDS)
                 + skipped);
     }

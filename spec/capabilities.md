@@ -299,4 +299,26 @@ only) and the top 5 stale documents; never DM text, asker ids, private-source co
 ## C11. Multi-tenant onboarding (Phase 7)
 
 Slack OAuth install, HTTP events, per-tenant credentials stored encrypted, self-serve
-source connection.
+source connection. Delivered in two parts.
+
+**Phase 7a: foundations and isolation (delivered).** A second company can be served by the same deployment
+without any cross-tenant leakage; the pilot keeps working unchanged (Socket Mode with the `.env` Slack tokens,
+one admin password, one configured tenant).
+
+- The tenant is explicit everywhere: from the signed-in `AdminPrincipal` on admin pages, from the event's
+  workspace (`team_id`) for Slack, from a loop over active tenants for scheduled jobs. No code assumes a single
+  global tenant.
+- A Slack workspace registry (`slack_installation`, bot token encrypted at rest) and a Slack client per tenant;
+  events from an unregistered workspace are ignored.
+- Per-tenant monthly budget, and tenant suspension (questions refused politely, syncs and jobs skipped).
+- Composite foreign keys so the database refuses cross-tenant references, a full tenant-predicate audit, and a
+  two-tenant test suite that proves isolation for search, answers, corrections, feedback, conversations,
+  proactive answers, stale flags, insights, digest, costs, budgets, sync, credentials, the Slack registry,
+  Slack event handling and the admin pages.
+- Not in 7a: there is still no way to *add* a tenant or its Slack workspace through the product (tenants and
+  installations are created in code or SQL), and the only admin sign-in is the pilot's.
+
+**Phase 7b: onboarding (next).** Slack OAuth install (registers a workspace and creates or links the tenant),
+HTTP Events API and interactivity endpoints (so more than one workspace can be served, alongside or instead of
+Socket Mode), per-tenant admin sign-in (`AdminAuthenticator` implementation using `tenant.admin_emails`), and
+self-serve connection of each tenant's own sources.

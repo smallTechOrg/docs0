@@ -44,7 +44,7 @@ class StatusTest extends IntegrationTest {
         insertInteraction(tenant.id(), "1.25");
         insertInteraction(other, "9.00");
 
-        var snap = status.snapshot();
+        var snap = status.snapshot(tenant.id());
 
         assertThat(snap.documents()).isEqualTo(1);
         assertThat(snap.questions()).isEqualTo(1);

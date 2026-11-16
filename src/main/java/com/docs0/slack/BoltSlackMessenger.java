@@ -1,6 +1,5 @@
 package com.docs0.slack;
 
-import com.docs0.config.Docs0Properties;
 import com.slack.api.Slack;
 import com.slack.api.SlackConfig;
 import com.slack.api.methods.MethodsClient;
@@ -17,18 +16,15 @@ import java.util.function.LongConsumer;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.stereotype.Component;
 
-/** {@link SlackMessenger} on the Slack Web API client, using the bot token. */
-@Component
+/** {@link SlackMessenger} on the Slack Web API client, using one workspace's bot token. Built by {@link SlackMessengers}. */
 public class BoltSlackMessenger implements SlackMessenger {
 
     private static final int MEMBER_PAGE_SIZE = 200;
     private static final int MAX_MEMBER_PAGES = 50;
 
     /** Who the bot token belongs to. */
-    public record Identity(String team, String botName, String botUserId) {}
+    public record Identity(String teamId, String team, String botName, String botUserId) {}
 
     static final int HISTORY_PAGE_SIZE = 200;
     static final int MAX_HISTORY_PAGES = 500;
@@ -41,10 +37,8 @@ public class BoltSlackMessenger implements SlackMessenger {
     private volatile String botUserId;
     private volatile Set<String> scopes;
 
-    @Autowired
-    public BoltSlackMessenger(Docs0Properties props) {
-        this(props.slack() == null || props.slack().botToken() == null ? "" : props.slack().botToken(), null,
-                BoltSlackMessenger::sleepSeconds);
+    public BoltSlackMessenger(String token) {
+        this(token == null ? "" : token, null, BoltSlackMessenger::sleepSeconds);
     }
 
     /** For tests: another API address (with a trailing slash) and a sleeper told how many seconds to wait. */
@@ -304,7 +298,7 @@ public class BoltSlackMessenger implements SlackMessenger {
             }
             scopes = Set.copyOf(granted);
         }
-        return new Identity(response.getTeam(), response.getUser(), response.getUserId());
+        return new Identity(response.getTeamId(), response.getTeam(), response.getUser(), response.getUserId());
     }
 
     private interface SlackCall<T> {

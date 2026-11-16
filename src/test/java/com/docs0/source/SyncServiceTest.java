@@ -55,7 +55,7 @@ class SyncServiceTest extends IntegrationTest {
         }
 
         @Override
-        public boolean configured() {
+        public boolean configured(long tenantId) {
             return true;
         }
 
@@ -70,8 +70,8 @@ class SyncServiceTest extends IntegrationTest {
     void recordsAnOkRunAndReusesTheSourceRow() {
         StubConnector connector = new StubConnector(() -> new SyncCounts(1, 2, 3, 4, 5));
 
-        SyncRun first = syncService.run(connector).orElseThrow();
-        SyncRun second = syncService.run(connector).orElseThrow();
+        SyncRun first = syncService.run(tenant.id(), connector).orElseThrow();
+        SyncRun second = syncService.run(tenant.id(), connector).orElseThrow();
 
         assertThat(first.status()).isEqualTo(SyncRun.OK);
         assertThat(first.counts()).isEqualTo(new SyncCounts(1, 2, 3, 4, 5));
@@ -94,12 +94,12 @@ class SyncServiceTest extends IntegrationTest {
             return SyncCounts.NONE;
         });
 
-        SyncRun failed = syncService.run(connector).orElseThrow();
+        SyncRun failed = syncService.run(tenant.id(), connector).orElseThrow();
 
         assertThat(failed.status()).isEqualTo(SyncRun.FAILED);
         assertThat(failed.error()).startsWith("IllegalStateException: xxx").hasSize(500);
         assertThat(failed.finishedAt()).isNotNull();
-        assertThat(syncService.run(connector).orElseThrow().status()).isEqualTo(SyncRun.OK);
+        assertThat(syncService.run(tenant.id(), connector).orElseThrow().status()).isEqualTo(SyncRun.OK);
     }
 
     @Test
@@ -112,10 +112,10 @@ class SyncServiceTest extends IntegrationTest {
             return SyncCounts.NONE;
         });
 
-        CompletableFuture<Optional<SyncRun>> first = CompletableFuture.supplyAsync(() -> syncService.run(connector));
+        CompletableFuture<Optional<SyncRun>> first = CompletableFuture.supplyAsync(() -> syncService.run(tenant.id(), connector));
         assertThat(started.await(10, TimeUnit.SECONDS)).isTrue();
 
-        assertThat(syncService.run(connector)).isEmpty();
+        assertThat(syncService.run(tenant.id(), connector)).isEmpty();
 
         release.countDown();
         assertThat(first.get(10, TimeUnit.SECONDS).orElseThrow().status()).isEqualTo(SyncRun.OK);
@@ -123,7 +123,7 @@ class SyncServiceTest extends IntegrationTest {
         assertThat(jdbc.sql("SELECT count(*) FROM sync_run").query(Long.class).single()).isEqualTo(1);
 
         // The guard is released afterwards.
-        assertThat(syncService.run(connector)).isPresent();
+        assertThat(syncService.run(tenant.id(), connector)).isPresent();
     }
 
     @Test
@@ -134,16 +134,16 @@ class SyncServiceTest extends IntegrationTest {
             return new SyncCounts(1, 0, 0, 0, 0);
         });
 
-        assertThat(syncService.startInBackground(connector)).isTrue();
+        assertThat(syncService.startInBackground(tenant.id(), connector)).isTrue();
 
         long sourceId = sources.find(tenant.id(), "STUB", "Stub").orElseThrow().id();
         assertThat(runs.latest(tenant.id(), sourceId).orElseThrow().status()).isEqualTo(SyncRun.RUNNING);
-        assertThat(syncService.isRunning(sourceId)).isTrue();
-        assertThat(syncService.startInBackground(connector)).isFalse();
+        assertThat(syncService.isRunning(tenant.id(), sourceId)).isTrue();
+        assertThat(syncService.startInBackground(tenant.id(), connector)).isFalse();
 
         release.countDown();
         org.awaitility.Awaitility.await().atMost(10, TimeUnit.SECONDS)
-                .until(() -> !syncService.isRunning(sourceId));
+                .until(() -> !syncService.isRunning(tenant.id(), sourceId));
         SyncRun finished = runs.latest(tenant.id(), sourceId).orElseThrow();
         assertThat(finished.status()).isEqualTo(SyncRun.OK);
         assertThat(finished.counts()).isEqualTo(new SyncCounts(1, 0, 0, 0, 0));
@@ -156,7 +156,7 @@ class SyncServiceTest extends IntegrationTest {
             throw new SourceAccessException("Reconnect it.");
         });
 
-        assertThat(syncService.run(connector).orElseThrow().error()).isEqualTo("Reconnect it.");
+        assertThat(syncService.run(tenant.id(), connector).orElseThrow().error()).isEqualTo("Reconnect it.");
     }
 
     @Test

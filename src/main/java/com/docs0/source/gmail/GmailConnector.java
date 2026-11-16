@@ -12,7 +12,6 @@ import com.docs0.source.gmail.GmailClient.KeyRejectedException;
 import com.docs0.source.gmail.GmailClient.MailThread;
 import com.docs0.source.gmail.GmailClient.ThreadPage;
 import com.docs0.source.gmail.GmailClient.ThreadRef;
-import com.docs0.tenant.TenantService;
 import com.docs0.web.StatusContributor;
 import java.io.IOException;
 import java.time.Clock;
@@ -58,26 +57,23 @@ public class GmailConnector implements SourceConnector, StatusContributor {
     private final GmailConnection connection;
     private final DocumentStore documents;
     private final SyncRunRepository runs;
-    private final TenantService tenants;
     private final int days;
     private final Clock clock;
     /** Mailbox -> why it was skipped in the last run, for the Sources page. */
-    private volatile Map<String, String> notes = Map.of();
+    private final Map<Long, Map<String, String>> notes = new java.util.concurrent.ConcurrentHashMap<>();
 
     @Autowired
     public GmailConnector(GmailClient client, GmailConnection connection, DocumentStore documents,
-                          SyncRunRepository runs, TenantService tenants,
+                          SyncRunRepository runs,
                           @Value("${docs0.gmail.days:90}") int days) {
-        this(client, connection, documents, runs, tenants, days, Clock.systemUTC());
+        this(client, connection, documents, runs, days, Clock.systemUTC());
     }
 
-    GmailConnector(GmailClient client, GmailConnection connection, DocumentStore documents, SyncRunRepository runs,
-                   TenantService tenants, int days, Clock clock) {
+    GmailConnector(GmailClient client, GmailConnection connection, DocumentStore documents, SyncRunRepository runs, int days, Clock clock) {
         this.client = client;
         this.connection = connection;
         this.documents = documents;
         this.runs = runs;
-        this.tenants = tenants;
         this.days = Math.max(1, days);
         this.clock = clock;
     }
@@ -107,15 +103,14 @@ public class GmailConnector implements SourceConnector, StatusContributor {
         return "after:" + clock.instant().minus(Duration.ofDays(days)).getEpochSecond() + " " + EXCLUDE;
     }
 
-    /** Why mailboxes were skipped in the last run, by mailbox address. */
-    public Map<String, String> notes() {
-        return notes;
+    /** Why this tenant's mailboxes were skipped in its last run, by mailbox address. */
+    public Map<String, String> notes(long tenantId) {
+        return notes.getOrDefault(tenantId, Map.of());
     }
 
     /** True when a key is stored and mailboxes are chosen, or documents remain from an earlier choice. */
     @Override
-    public boolean configured() {
-        long tenantId = tenants.current().id();
+    public boolean configured(long tenantId) {
         Optional<Source> source = connection.source(tenantId);
         if (source.isEmpty()) {
             return false;
@@ -153,7 +148,7 @@ public class GmailConnector implements SourceConnector, StatusContributor {
         }
         tally.removed += documents.markDeleted(tenantId, sourceId, leftovers);
         if (chosen.isEmpty()) {
-            notes = Map.of();
+            notes.remove(tenantId);
             return new SyncCounts(0, 0, tally.removed, 0, 0);
         }
 
@@ -177,7 +172,7 @@ public class GmailConnector implements SourceConnector, StatusContributor {
                 log.warn("Gmail mailbox #{} could not be synced: {}", index, e.getClass().getName());
             }
         }
-        notes = Map.copyOf(newNotes);
+        notes.put(tenantId, Map.copyOf(newNotes));
         return new SyncCounts(tally.added, tally.updated, tally.removed, 0, tally.failed);
     }
 
@@ -245,8 +240,7 @@ public class GmailConnector implements SourceConnector, StatusContributor {
 
     /** Reads only the database; never calls Google. */
     @Override
-    public ComponentStatus status() {
-        long tenantId = tenants.current().id();
+    public ComponentStatus status(long tenantId) {
         Optional<com.docs0.source.SourceCredential> credential = connection.credential(tenantId);
         if (credential.isEmpty()) {
             return ComponentStatus.off(NAME, "not connected — add a service account key on the Sources page");
@@ -268,7 +262,8 @@ public class GmailConnector implements SourceConnector, StatusContributor {
         if (SyncRun.RUNNING.equals(run.status())) {
             return ComponentStatus.up(NAME, count + " threads, sync in progress");
         }
-        String skipped = notes.isEmpty() ? "" : ", " + notes.size() + " mailboxes skipped";
+        Map<String, String> skippedNotes = notes(tenantId);
+        String skipped = skippedNotes.isEmpty() ? "" : ", " + skippedNotes.size() + " mailboxes skipped";
         return ComponentStatus.up(NAME, count + " threads in " + mailboxes + " mailboxes, last sync "
                 + run.finishedAt().truncatedTo(ChronoUnit.SECONDS) + skipped);
     }

@@ -115,7 +115,7 @@ class ProactiveAnswersTest {
         CorrectionFlow flow = new CorrectionFlow(new CorrectionDetector(new SlackFakes.FakeLlm(), p),
                 new ConversationRepository(jdbc), interactions, new FeedbackRepository(jdbc),
                 new com.docs0.feedback.CorrectionRepository(jdbc), slack);
-        return new QuestionHandler(new TenantService(jdbc, p), agent, knowledgeFake, budget,
+        return new QuestionHandler(new TenantService(jdbc), agent, knowledgeFake, budget,
                 new ConversationRepository(jdbc), interactions, slack, flow,
                 new com.docs0.action.PendingActionRepository(jdbc), new IdentityService(jdbc, slack), responder,
                 new StaleDocs(jdbc, slack, 365), usage, Duration.ZERO);
@@ -143,7 +143,7 @@ class ProactiveAnswersTest {
     }
 
     private void send(IncomingEvent event) throws Exception {
-        CompletableFuture<Void> done = handler.handle(event);
+        CompletableFuture<Void> done = handler.handle(tenantId, event);
         done.get(10, TimeUnit.SECONDS);
     }
 
@@ -216,10 +216,10 @@ class ProactiveAnswersTest {
     void aThumbsDownOnAnUnpromptedAnswerCountsLikeAnyOtherAndMutesTheChannel() throws Exception {
         ask(NEW_QUESTION, "100.1");
         String answerTs = slack.onlyPost().ts();
-        ReactionHandler reactions = new ReactionHandler(new TenantService(jdbc, props), interactions,
+        ReactionHandler reactions = new ReactionHandler(interactions,
                 new FeedbackRepository(jdbc), slack);
 
-        reactions.handle(new ReactionEvent(true, CHANNEL, "U2", "-1", answerTs)).get(10, TimeUnit.SECONDS);
+        reactions.handle(tenantId, new ReactionEvent(true, CHANNEL, "U2", "-1", answerTs)).get(10, TimeUnit.SECONDS);
 
         assertThat(jdbc.sql("SELECT count(*) FROM feedback WHERE rating = 'DOWN'").query(Long.class).single()).isEqualTo(1);
         // Quiet for a day: a similar question is not answered even though the cool-down is long past.

@@ -12,7 +12,6 @@ import com.docs0.source.SyncRunRepository;
 import com.docs0.source.trello.TrelloClient.BoardContent;
 import com.docs0.source.trello.TrelloClient.BoardList;
 import com.docs0.source.trello.TrelloClient.Card;
-import com.docs0.tenant.TenantService;
 import com.docs0.web.StatusContributor;
 import java.io.IOException;
 import java.time.Instant;
@@ -44,15 +43,13 @@ public class TrelloConnector implements SourceConnector, StatusContributor {
     private final TrelloConnection connection;
     private final DocumentStore documents;
     private final SyncRunRepository runs;
-    private final TenantService tenants;
 
     public TrelloConnector(TrelloClient client, TrelloConnection connection, DocumentStore documents,
-                           SyncRunRepository runs, TenantService tenants) {
+                           SyncRunRepository runs) {
         this.client = client;
         this.connection = connection;
         this.documents = documents;
         this.runs = runs;
-        this.tenants = tenants;
     }
 
     @Override
@@ -72,8 +69,7 @@ public class TrelloConnector implements SourceConnector, StatusContributor {
 
     /** True when Trello is connected and either boards are chosen or documents remain from an earlier choice. */
     @Override
-    public boolean configured() {
-        long tenantId = tenants.current().id();
+    public boolean configured(long tenantId) {
         Optional<Source> source = connection.source(tenantId);
         if (source.isEmpty() || connection.credential(tenantId).isEmpty()) {
             return false;
@@ -157,8 +153,7 @@ public class TrelloConnector implements SourceConnector, StatusContributor {
 
     /** Reads only the database; never calls Trello. */
     @Override
-    public ComponentStatus status() {
-        long tenantId = tenants.current().id();
+    public ComponentStatus status(long tenantId) {
         Optional<SourceCredential> credential = connection.credential(tenantId);
         if (credential.isEmpty()) {
             return ComponentStatus.off(NAME, "not connected — connect it on the Sources page");

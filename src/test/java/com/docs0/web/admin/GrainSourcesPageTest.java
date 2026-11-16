@@ -65,7 +65,7 @@ class GrainSourcesPageTest extends IntegrationTest {
     @AfterEach
     void letSyncsFinish() {
         await().atMost(15, TimeUnit.SECONDS).until(() ->
-                grain.source(tenant.id()).map(s -> !syncService.isRunning(s.id())).orElse(true));
+                grain.source(tenant.id()).map(s -> !syncService.isRunning(tenant.id(), s.id())).orElse(true));
     }
 
     @Test
@@ -151,7 +151,7 @@ class GrainSourcesPageTest extends IntegrationTest {
 
         mvc.perform(form("/admin/sources/grain/sync")).andExpect(status().isFound())
                 .andExpect(redirectedUrl("/admin/sources#grain"));
-        await().atMost(15, TimeUnit.SECONDS).until(() -> !syncService.isRunning(grain.source(tenant.id()).orElseThrow().id()));
+        await().atMost(15, TimeUnit.SECONDS).until(() -> !syncService.isRunning(tenant.id(), grain.source(tenant.id()).orElseThrow().id()));
 
         String html = page("/admin/sources");
         assertThat(html).contains("<span>1</span> added").contains("Complete").contains("<span>1</span> documents indexed");
@@ -165,7 +165,7 @@ class GrainSourcesPageTest extends IntegrationTest {
         connect();
         Instant start = Instant.now().minusSeconds(86400);
         grainApi.recordings.put("r1", FakeGrainClient.recording("r1", "Launch sync", start, start.plusSeconds(600)));
-        syncService.run(grainConnector);
+        syncService.run(tenant.id(), grainConnector);
         assertThat(search.count(tenant.id())).isEqualTo(1);
 
         String ask = page("/admin/sources?confirm=grain");
@@ -178,7 +178,7 @@ class GrainSourcesPageTest extends IntegrationTest {
         assertThat(credentialRows()).isZero();
         assertThat(search.count(tenant.id())).isZero();
         assertThat(follow(done)).contains("Grain disconnected.").contains("id=\"grain-not-connected\"");
-        assertThat(grainConnector.status().detail()).isEqualTo("not connected — connect it on the Sources page");
+        assertThat(grainConnector.status(tenant.id()).detail()).isEqualTo("not connected — connect it on the Sources page");
     }
 
     @Test

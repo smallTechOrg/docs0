@@ -77,13 +77,13 @@ public class ProactiveResponder {
     private final BudgetService budget;
     private final UsageLog usage;
     private final LlmClient llm;
-    private final SlackMessenger messenger;
+    private final SlackMessengers messengers;
     private final Docs0Properties.Anthropic settings;
     private final int maxPerHour;
 
     @Autowired
     public ProactiveResponder(ChannelSettings channels, InteractionRepository interactions, ProactiveOffers offers,
-            BudgetService budget, UsageLog usage, LlmClient llm, SlackMessenger messenger, Docs0Properties props,
+            BudgetService budget, UsageLog usage, LlmClient llm, SlackMessengers messengers, Docs0Properties props,
             @Value("${docs0.proactive.max-per-hour:3}") int maxPerHour) {
         this.channels = channels;
         this.interactions = interactions;
@@ -91,7 +91,7 @@ public class ProactiveResponder {
         this.budget = budget;
         this.usage = usage;
         this.llm = llm;
-        this.messenger = messenger;
+        this.messengers = messengers;
         this.settings = props.anthropic();
         this.maxPerHour = maxPerHour;
     }
@@ -155,7 +155,7 @@ public class ProactiveResponder {
         }
         List<SimilarQuestion> candidates = interactions.similarAnswered(tenantId, text, channel, ts, MIN_RANK,
                 MAX_CANDIDATES);
-        if (candidates.isEmpty() || hasReplies(channel, ts)) {
+        if (candidates.isEmpty() || hasReplies(tenantId, channel, ts)) {
             return Optional.empty();
         }
         OptionalLong offerId = offers.claim(tenantId, channel, ts, candidates.get(0).id());
@@ -179,9 +179,9 @@ public class ProactiveResponder {
     }
 
     /** True when the message already has replies (or Slack cannot say), so docs0 must not jump in. */
-    private boolean hasReplies(String channel, String ts) {
+    private boolean hasReplies(long tenantId, String channel, String ts) {
         try {
-            return messenger.replies(channel, ts).size() > 1;
+            return messengers.forTenant(tenantId).replies(channel, ts).size() > 1;
         } catch (RuntimeException e) {
             return true;
         }

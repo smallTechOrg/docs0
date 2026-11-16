@@ -1,6 +1,7 @@
 package com.docs0.slack;
 
 import com.docs0.config.Docs0Properties;
+import com.docs0.tenant.local.LocalSlackPilot;
 import com.docs0.web.StatusContributor;
 import com.slack.api.app_backend.interactive_components.payload.BlockActionPayload;
 import com.slack.api.bolt.App;
@@ -18,6 +19,8 @@ import com.slack.api.model.event.ReactionAddedEvent;
 import com.slack.api.model.event.ReactionRemovedEvent;
 import com.slack.api.socket_mode.SocketModeClient;
 import jakarta.annotation.PreDestroy;
+import java.util.Optional;
+import java.util.OptionalLong;
 import java.util.regex.Pattern;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -29,6 +32,10 @@ import org.springframework.stereotype.Component;
  * Connects docs0 to Slack over Socket Mode and passes messages to {@link QuestionHandler}.
  * Every Slack event is acknowledged at once; answering happens on other threads.
  * Never blocks or fails application startup.
+ *
+ * <p>Socket Mode serves the one Slack app configured in DOCS0_SLACK_*_TOKEN (the pilot workspace). Whatever
+ * workspace an event comes from, its tenant is looked up in {@link SlackWorkspaces} by team id; an event from a
+ * workspace nobody registered is ignored.
  */
 @Component
 public class SlackGateway implements StatusContributor {
@@ -44,7 +51,8 @@ public class SlackGateway implements StatusContributor {
     private static final long RETRY_DELAY_MILLIS = 30_000;
 
     private final Docs0Properties props;
-    private final BoltSlackMessenger messenger;
+    private final SlackWorkspaces workspaces;
+    private final LocalSlackPilot pilot;
     private final QuestionHandler handler;
     private final ReactionHandler reactions;
     private final ActionHandler draftActions;
@@ -54,10 +62,11 @@ public class SlackGateway implements StatusContributor {
     private volatile Thread connector;
     private volatile boolean stopped;
 
-    public SlackGateway(Docs0Properties props, BoltSlackMessenger messenger, QuestionHandler handler,
-            ReactionHandler reactions, ActionHandler draftActions) {
+    public SlackGateway(Docs0Properties props, SlackWorkspaces workspaces, LocalSlackPilot pilot,
+            QuestionHandler handler, ReactionHandler reactions, ActionHandler draftActions) {
         this.props = props;
-        this.messenger = messenger;
+        this.workspaces = workspaces;
+        this.pilot = pilot;
         this.handler = handler;
         this.reactions = reactions;
         this.draftActions = draftActions;
@@ -66,8 +75,12 @@ public class SlackGateway implements StatusContributor {
                 : ComponentStatus.off(NAME, "no Slack tokens configured");
     }
 
+    /** The Socket Mode connection serves the pilot tenant only; every other tenant has no connection to report. */
     @Override
-    public ComponentStatus status() {
+    public ComponentStatus status(long tenantId) {
+        if (pilot != null && tenantId != pilot.tenantId()) {
+            return ComponentStatus.off(NAME, "not connected: Socket Mode serves only the configured workspace");
+        }
         return status;
     }
 
@@ -124,7 +137,8 @@ public class SlackGateway implements StatusContributor {
     }
 
     private void connect() throws Exception {
-        BoltSlackMessenger.Identity identity = messenger.identify();
+        // The workspace is registered for the configured tenant before any event is accepted.
+        BoltSlackMessenger.Identity identity = pilot.register();
 
         App app = new App(AppConfig.builder().singleTeamBotToken(props.slack().botToken()).build());
         register(app);
@@ -142,11 +156,11 @@ public class SlackGateway implements StatusContributor {
 
     private void register(App app) {
         app.event(AppMentionEvent.class, (payload, ctx) -> {
-            dispatch(() -> handler.handle(fromMention(payload.getEvent(), payload.getEventId())));
+            dispatch(() -> incoming(payload.getTeamId(), fromMention(payload.getEvent(), payload.getEventId())));
             return ctx.ack();
         });
         app.event(MessageEvent.class, (payload, ctx) -> {
-            dispatch(() -> handler.handle(fromMessage(payload.getEvent(), payload.getEventId())));
+            dispatch(() -> incoming(payload.getTeamId(), fromMessage(payload.getEvent(), payload.getEventId())));
             return ctx.ack();
         });
         app.blockAction(FOLLOW_UP_ACTION, (request, ctx) -> {
@@ -169,13 +183,38 @@ public class SlackGateway implements StatusContributor {
         app.event(MessageThreadBroadcastEvent.class, (payload, ctx) -> ctx.ack());
         // Thumbs up and down on answers are feedback.
         app.event(ReactionAddedEvent.class, (payload, ctx) -> {
-            dispatch(() -> reactions.handle(fromReactionAdded(payload.getEvent())));
+            dispatch(() -> reaction(payload.getTeamId(), fromReactionAdded(payload.getEvent())));
             return ctx.ack();
         });
         app.event(ReactionRemovedEvent.class, (payload, ctx) -> {
-            dispatch(() -> reactions.handle(fromReactionRemoved(payload.getEvent())));
+            dispatch(() -> reaction(payload.getTeamId(), fromReactionRemoved(payload.getEvent())));
             return ctx.ack();
         });
+    }
+
+    /**
+     * The tenant of a Slack workspace. Empty, with only the workspace id logged, for a workspace docs0 does not serve:
+     * its events are dropped, never answered from some other tenant's knowledge.
+     */
+    OptionalLong tenantOf(String teamId) {
+        Optional<SlackWorkspaces.Installation> installation = workspaces.byTeamId(teamId);
+        if (installation.isEmpty()) {
+            log.info("Slack event from an unknown workspace ignored: team={}", teamId);
+            return OptionalLong.empty();
+        }
+        return OptionalLong.of(installation.get().tenantId());
+    }
+
+    private void incoming(String teamId, IncomingEvent event) {
+        if (event != null) {
+            tenantOf(teamId).ifPresent(tenantId -> handler.handle(tenantId, event.withTeam(teamId)));
+        }
+    }
+
+    private void reaction(String teamId, ReactionEvent event) {
+        if (event != null) {
+            tenantOf(teamId).ifPresent(tenantId -> reactions.handle(tenantId, event.withTeam(teamId)));
+        }
     }
 
     /** Hands an event to the handler without ever failing the acknowledgement. */
@@ -201,17 +240,26 @@ public class SlackGateway implements StatusContributor {
         String threadTs = payload.getMessage() != null && payload.getMessage().getThreadTs() != null
                 ? payload.getMessage().getThreadTs()
                 : container != null ? container.getThreadTs() : null;
-        handler.followUp(channel, followUpThread(channel, threadTs, messageTs), payload.getUser().getId(),
-                action.getValue(), payload.getUser().getId() + ":" + messageTs + ":" + action.getActionTs());
+        tenantOf(teamOf(payload)).ifPresent(tenantId -> handler.followUp(tenantId, channel,
+                followUpThread(channel, threadTs, messageTs), payload.getUser().getId(), action.getValue(),
+                payload.getUser().getId() + ":" + messageTs + ":" + action.getActionTs()));
     }
 
     /** A click on Create or Cancel under a draft. */
     private void draftClick(BlockActionPayload payload) {
         DraftClick click = fromDraftClick(payload);
         if (click != null) {
-            draftActions.handle(click.channel(), click.messageTs(), click.threadTs(), click.user(),
-                    click.actionId(), click.value());
+            tenantOf(teamOf(payload)).ifPresent(tenantId -> draftActions.handle(tenantId, click.channel(),
+                    click.messageTs(), click.threadTs(), click.user(), click.actionId(), click.value()));
         }
+    }
+
+    /** The workspace a button click came from. */
+    static String teamOf(BlockActionPayload payload) {
+        if (payload.getTeam() != null && payload.getTeam().getId() != null) {
+            return payload.getTeam().getId();
+        }
+        return payload.getUser() == null ? null : payload.getUser().getTeamId();
     }
 
     /** What a click on a draft's button carries. {@code threadTs} is null for an unthreaded DM. */
@@ -296,6 +344,9 @@ public class SlackGateway implements StatusContributor {
     }
 
     private static boolean isNetworkTrouble(Exception e) {
+        if (e instanceof IllegalStateException || e instanceof IllegalArgumentException) {
+            return false; // the workspace cannot be stored (for example no DOCS0_ENCRYPTION_KEY): retrying cannot help
+        }
         return !(e instanceof SlackMessenger.SlackCallException slack) || slack.code().equals("network_error");
     }
 
@@ -305,6 +356,9 @@ public class SlackGateway implements StatusContributor {
             return slack.code().equals("network_error")
                     ? "could not reach Slack"
                     : "Slack rejected the bot token (" + slack.code() + ")";
+        }
+        if (e instanceof IllegalStateException || e instanceof IllegalArgumentException) {
+            return "could not store the Slack workspace (is DOCS0_ENCRYPTION_KEY set?)";
         }
         return "could not open the Socket Mode connection (" + e.getClass().getSimpleName() + ")";
     }

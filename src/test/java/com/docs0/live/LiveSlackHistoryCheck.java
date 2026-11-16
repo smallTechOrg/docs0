@@ -45,7 +45,7 @@ class LiveSlackHistoryCheck extends IntegrationTest {
     void listsChannelsAndRendersTheLastDayOfOne() throws Exception {
         Docs0Properties props = new Docs0Properties(null, null, null,
                 new Docs0Properties.Slack(System.getenv("DOCS0_SLACK_BOT_TOKEN"), ""), null, null, null, null, null);
-        BoltSlackMessenger messenger = new BoltSlackMessenger(props);
+        BoltSlackMessenger messenger = new BoltSlackMessenger(System.getenv("DOCS0_SLACK_BOT_TOKEN"));
 
         List<ChannelInfo> channels = messenger.listChannels();
         long publicCount = channels.stream().filter(c -> !c.isPrivate()).count();
@@ -60,17 +60,16 @@ class LiveSlackHistoryCheck extends IntegrationTest {
                 .filter(c -> wanted != null && !wanted.isBlank() ? c.id().equals(wanted) : !c.isPrivate() && c.member())
                 .findFirst().orElseThrow(() -> new AssertionError("no suitable channel; set DOCS0_LIVE_SLACK_CHANNEL"));
 
-        IdentityService identities = new IdentityService(jdbc, messenger);
+        IdentityService identities = new IdentityService(jdbc, t -> messenger);
         SlackHistoryConnection connection = new SlackHistoryConnection(sources);
         connection.setChannels(tenant.id(), List.of(new SlackChannel(pick.id(), pick.name(), pick.isPrivate())));
-        SlackHistoryConnector connector = new SlackHistoryConnector(messenger, identities, connection, store, runs,
-                tenants, props, 1);
+        SlackHistoryConnector connector = new SlackHistoryConnector(t -> messenger, identities, connection, store, runs, 1);
 
         SyncCounts counts = connector.sync(tenant.id(), connection.source(tenant.id()).orElseThrow().id());
         long documents = store.count(tenant.id(), connection.source(tenant.id()).orElseThrow().id());
         long restricted = jdbc.sql("SELECT count(*) FROM document WHERE restricted").query(Long.class).single();
         System.out.println("SLACK sync private=" + pick.isPrivate() + " counts=" + counts + " documents=" + documents
-                + " restricted=" + restricted + " emailScopeMissing=" + identities.emailScopeMissing());
+                + " restricted=" + restricted + " emailScopeMissing=" + identities.emailScopeMissing(tenant.id()));
         assertThat(counts.failed()).isZero();
     }
 }

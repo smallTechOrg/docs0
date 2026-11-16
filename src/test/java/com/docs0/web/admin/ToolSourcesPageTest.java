@@ -88,8 +88,8 @@ class ToolSourcesPageTest extends IntegrationTest {
     @AfterEach
     void letSyncsFinish() {
         await().atMost(15, TimeUnit.SECONDS).until(() ->
-                linear.source(tenant.id()).map(s -> !syncService.isRunning(s.id())).orElse(true)
-                        && trello.source(tenant.id()).map(s -> !syncService.isRunning(s.id())).orElse(true));
+                linear.source(tenant.id()).map(s -> !syncService.isRunning(tenant.id(), s.id())).orElse(true)
+                        && trello.source(tenant.id()).map(s -> !syncService.isRunning(tenant.id(), s.id())).orElse(true));
     }
 
     // --- not connected ---------------------------------------------------------------------
@@ -228,7 +228,7 @@ class ToolSourcesPageTest extends IntegrationTest {
 
         mvc.perform(form("/admin/sources/linear/sync")).andExpect(status().isFound())
                 .andExpect(redirectedUrl("/admin/sources#linear"));
-        await().atMost(15, TimeUnit.SECONDS).until(() -> !syncService.isRunning(linear.source(tenant.id()).orElseThrow().id()));
+        await().atMost(15, TimeUnit.SECONDS).until(() -> !syncService.isRunning(tenant.id(), linear.source(tenant.id()).orElseThrow().id()));
 
         String html = page("/admin/sources");
         assertThat(html).contains("<span>1</span> added").contains("Complete").contains("<span>1</span> documents indexed");
@@ -247,7 +247,7 @@ class ToolSourcesPageTest extends IntegrationTest {
         linearApi.acceptedKey = "no-longer-valid";
 
         mvc.perform(form("/admin/sources/linear/sync")).andExpect(status().isFound());
-        await().atMost(15, TimeUnit.SECONDS).until(() -> !syncService.isRunning(linear.source(tenant.id()).orElseThrow().id()));
+        await().atMost(15, TimeUnit.SECONDS).until(() -> !syncService.isRunning(tenant.id(), linear.source(tenant.id()).orElseThrow().id()));
 
         assertThat(page("/admin/sources")).contains("Failed")
                 .contains("Linear rejected the API key. Reconnect Linear on the Sources page.");
@@ -269,7 +269,7 @@ class ToolSourcesPageTest extends IntegrationTest {
         connectLinear();
         linear.setTeams(tenant.id(), List.of(new LinearTeam("team-eng", "ENG", "Engineering")));
         linearApi.issuesByTeam.put("team-eng", List.of(FakeLinearClient.issue("i1", "ENG-1", "Fix login", T0)));
-        syncService.run(linearConnector);
+        syncService.run(tenant.id(), linearConnector);
         assertThat(search.count(tenant.id())).isEqualTo(1);
 
         String ask = page("/admin/sources?confirm=linear");
@@ -283,7 +283,7 @@ class ToolSourcesPageTest extends IntegrationTest {
         assertThat(search.count(tenant.id())).isZero();
         assertThat(linear.teams(tenant.id())).hasSize(1);
         assertThat(follow(done)).contains("Linear disconnected.").contains("id=\"linear-not-connected\"");
-        assertThat(linearConnector.status().detail()).isEqualTo("not connected — connect it on the Sources page");
+        assertThat(linearConnector.status(tenant.id()).detail()).isEqualTo("not connected — connect it on the Sources page");
     }
 
     // --- Trello -------------------------------------------------------------------------------
@@ -359,7 +359,7 @@ class ToolSourcesPageTest extends IntegrationTest {
                 .contains("docs0 can read Roadmap: 1 card.");
 
         mvc.perform(form("/admin/sources/trello/sync")).andExpect(status().isFound());
-        await().atMost(15, TimeUnit.SECONDS).until(() -> !syncService.isRunning(trello.source(tenant.id()).orElseThrow().id()));
+        await().atMost(15, TimeUnit.SECONDS).until(() -> !syncService.isRunning(tenant.id(), trello.source(tenant.id()).orElseThrow().id()));
         String html = page("/admin/sources");
         assertThat(html).contains("<span>2</span> added").contains("Complete");
         assertThat(search.search(tenant.id(), Audience.sharedOnly(), "venue", 5).hits()).hasSize(1);

@@ -7,7 +7,7 @@ import java.time.ZoneOffset;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Service;
 
-/** Enforces the tenant's hard monthly spend cap, based on the logged cost of every interaction and every other model call. */
+/** Enforces each tenant's hard monthly spend cap, based on the logged cost of every interaction and every other model call. */
 @Service
 public class BudgetService {
 
@@ -52,14 +52,25 @@ public class BudgetService {
         return LocalDate.now(ZoneOffset.UTC).withDayOfMonth(1).atStartOfDay().atOffset(ZoneOffset.UTC);
     }
 
-    /** The configured cap in USD, or null when uncapped. */
-    public BigDecimal monthlyCap() {
+    /**
+     * The tenant's monthly cap in USD, or null when uncapped: the tenant's own limit when it has a positive one,
+     * otherwise the global default ({@code DOCS0_MONTHLY_BUDGET_USD}).
+     */
+    public BigDecimal monthlyCap(long tenantId) {
+        BigDecimal own = jdbc.sql("SELECT monthly_budget_usd FROM tenant WHERE id = :tenantId")
+                .param("tenantId", tenantId)
+                .query(BigDecimal.class)
+                .optional()
+                .orElse(null);
+        if (own != null && own.signum() > 0) {
+            return own;
+        }
         return props.budget().capped() ? props.budget().monthlyUsd() : null;
     }
 
-    /** True when the cap is set and this month's spend has reached it. New questions must be refused. */
+    /** True when the tenant's cap is set and this month's spend has reached it. New questions must be refused. */
     public boolean exhausted(long tenantId) {
-        BigDecimal cap = monthlyCap();
+        BigDecimal cap = monthlyCap(tenantId);
         return cap != null && spentThisMonth(tenantId).compareTo(cap) >= 0;
     }
 }

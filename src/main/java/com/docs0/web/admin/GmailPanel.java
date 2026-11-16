@@ -85,7 +85,7 @@ public class GmailPanel {
             return new Panel("disconnected", null, null, false, false, 0, List.of(), null, historyDays, List.of());
         }
         long sourceId = credential.get().sourceId();
-        boolean running = syncService.isRunning(sourceId);
+        boolean running = syncService.isRunning(tenantId, sourceId);
         List<SourcesController.RunRow> rows = new ArrayList<>();
         for (SyncRun run : runs.recent(tenantId, sourceId, RECENT_RUNS)) {
             rows.add(SourcesController.runRow(run, running));
@@ -103,7 +103,7 @@ public class GmailPanel {
         if (cached != null && cached.at().plus(KEEP).isAfter(Instant.now())) {
             cached.users().forEach(u -> names.put(u.email().toLowerCase(Locale.ROOT), u.name() == null ? "" : u.name()));
         }
-        Map<String, String> notes = connector.notes();
+        Map<String, String> notes = connector.notes(tenantId);
         List<Row> rows = new ArrayList<>();
         java.util.Set<String> chosen = new java.util.HashSet<>();
         for (Mailbox mailbox : connection.mailboxes(tenantId)) {

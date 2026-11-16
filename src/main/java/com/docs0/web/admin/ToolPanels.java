@@ -189,7 +189,7 @@ public class ToolPanels {
     private Panel connected(String id, String title, SourceCredential credential, long sourceId, boolean confirm,
                             List<Choice> choices, String error) {
         long tenantId = credential.tenantId();
-        boolean running = syncService.isRunning(sourceId);
+        boolean running = syncService.isRunning(tenantId, sourceId);
         List<SourcesController.RunRow> rows = new ArrayList<>();
         for (SyncRun run : runs.recent(tenantId, sourceId, RECENT_RUNS)) {
             rows.add(SourcesController.runRow(run, running));

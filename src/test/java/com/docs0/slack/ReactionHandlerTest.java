@@ -39,13 +39,13 @@ class ReactionHandlerTest {
         Docs0Properties props = new Docs0Properties(new Docs0Properties.Tenant("smalltech", "smallTech"), null, null,
                 null, null, null, "", "", "");
         feedback = new FeedbackRepository(jdbc);
-        handler = new ReactionHandler(new TenantService(jdbc, props), new InteractionRepository(jdbc), feedback, slack);
+        handler = new ReactionHandler(new InteractionRepository(jdbc), feedback, slack);
         Conversation thread = TestData.conversation(jdbc, tenantId, CHANNEL, "100.1", false);
         interactionId = TestData.interaction(jdbc, thread, "U1", "What is the price?", "It is $12.", ANSWER_TS, "0.01");
     }
 
     private void react(boolean added, String user, String reaction, String channel, String ts) throws Exception {
-        handler.handle(new ReactionEvent(added, channel, user, reaction, ts)).get(10, TimeUnit.SECONDS);
+        handler.handle(tenantId, new ReactionEvent(added, channel, user, reaction, ts)).get(10, TimeUnit.SECONDS);
     }
 
     private List<Map<String, Object>> rows() {
@@ -99,8 +99,8 @@ class ReactionHandlerTest {
         react(true, "U2", "+1", "C999", ANSWER_TS);           // same ts, other channel
         react(true, "U2", "tada", CHANNEL, ANSWER_TS);        // not a thumb
         react(true, "UBOT", "-1", CHANNEL, ANSWER_TS);        // docs0's own reaction
-        handler.handle(null).get(10, TimeUnit.SECONDS);
-        handler.handle(new ReactionEvent(true, CHANNEL, "", "+1", ANSWER_TS)).get(10, TimeUnit.SECONDS);
+        handler.handle(tenantId, null).get(10, TimeUnit.SECONDS);
+        handler.handle(tenantId, new ReactionEvent(true, CHANNEL, "", "+1", ANSWER_TS)).get(10, TimeUnit.SECONDS);
 
         assertThat(rows()).isEmpty();
         assertThat(slack.posts).isEmpty();

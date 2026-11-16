@@ -1,6 +1,8 @@
 package com.docs0.source;
 
 import com.docs0.config.Docs0Properties;
+import com.docs0.tenant.Tenant;
+import com.docs0.tenant.TenantService;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 import org.slf4j.Logger;
@@ -22,17 +24,20 @@ public class SyncScheduler {
     private final SyncService syncService;
     private final List<SourceConnector> connectors;
     private final Docs0Properties props;
+    private final TenantService tenants;
 
-    public SyncScheduler(SyncService syncService, List<SourceConnector> connectors, Docs0Properties props) {
+    public SyncScheduler(SyncService syncService, List<SourceConnector> connectors, Docs0Properties props,
+                         TenantService tenants) {
         this.syncService = syncService;
         this.connectors = connectors;
         this.props = props;
+        this.tenants = tenants;
     }
 
     /** Startup sync, on its own thread so a long first sync never delays the app coming up. */
     @EventListener(ApplicationReadyEvent.class)
     public void onReady() {
-        if (!props.drive().syncOnStartup() || connectors.stream().noneMatch(SourceConnector::configured)) {
+        if (!props.drive().syncOnStartup()) {
             return;
         }
         Thread.ofVirtual().name("startup-sync").start(this::syncAll);
@@ -43,15 +48,42 @@ public class SyncScheduler {
             fixedDelayString = "${docs0.drive.sync-interval-minutes:15}",
             timeUnit = TimeUnit.MINUTES)
     public void syncAll() {
-        for (SourceConnector connector : connectors) {
-            if (!connector.configured()) {
-                continue;
-            }
+        List<Tenant> active;
+        try {
+            active = tenants.active();
+        } catch (RuntimeException e) {
+            log.warn("Could not list tenants to sync: {}", e.getClass().getName());
+            return;
+        }
+        // Tenants run side by side, so a slow or stuck one never holds up the others; this returns when all are done.
+        List<Thread> running = new java.util.ArrayList<>();
+        for (Tenant tenant : active) {
+            running.add(Thread.ofVirtual().name("sync-tenant-" + tenant.id()).start(() -> syncTenant(tenant.id())));
+        }
+        for (Thread thread : running) {
             try {
-                syncService.run(connector);
+                thread.join();
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return;
+            }
+        }
+    }
+
+    /**
+     * Every configured connector of one tenant. A failing source never stops the next source or the next tenant:
+     * each is tried on its own.
+     */
+    void syncTenant(long tenantId) {
+        for (SourceConnector connector : connectors) {
+            try {
+                if (!connector.configured(tenantId)) {
+                    continue;
+                }
+                syncService.run(tenantId, connector);
             } catch (RuntimeException e) {
                 // SyncService records connector failures itself; this is the database being unreachable.
-                log.warn("Could not sync {}: {}", connector.name(), e.toString());
+                log.warn("Could not sync {} for tenant {}: {}", connector.name(), tenantId, e.toString());
             }
         }
     }

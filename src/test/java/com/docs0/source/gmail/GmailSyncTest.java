@@ -68,7 +68,7 @@ class GmailSyncTest extends IntegrationTest {
     void setUp() {
         gmail = new FakeGmailClient();
         connection = new GmailConnection(new TokenCipher(DriveTestSetup.ENCRYPTION_KEY), sources, credentials, store);
-        connector = new GmailConnector(gmail, connection, store, runs, tenants, 90,
+        connector = new GmailConnector(gmail, connection, store, runs, 90,
                 Clock.fixed(NOW, ZoneOffset.UTC));
         connection.connect(tenant.id(), new GmailKey(TestKeys.EMAIL, TestKeys.CLIENT_ID), FakeGmailClient.KEY);
     }
@@ -111,7 +111,7 @@ class GmailSyncTest extends IntegrationTest {
     void nothingIsReadUntilAMailboxIsChosen() throws Exception {
         gmail.put(ANA, "t1", "10", "Hello", "hi", T0);
 
-        assertThat(connector.configured()).isFalse();
+        assertThat(connector.configured(tenant.id())).isFalse();
         assertThat(sync()).isEqualTo(SyncCounts.NONE);
 
         assertThat(gmail.keysSeen).isEmpty();
@@ -234,12 +234,12 @@ class GmailSyncTest extends IntegrationTest {
         gmail.keysSeen.clear();
         choose();
 
-        assertThat(connector.configured()).isTrue(); // documents remain to be cleared
+        assertThat(connector.configured(tenant.id())).isTrue(); // documents remain to be cleared
         assertThat(sync()).isEqualTo(new SyncCounts(0, 0, 1, 0, 0));
 
         assertThat(live()).isEmpty();
         assertThat(gmail.keysSeen).isEmpty();
-        assertThat(connector.configured()).isFalse();
+        assertThat(connector.configured(tenant.id())).isFalse();
     }
 
     @Test
@@ -286,12 +286,12 @@ class GmailSyncTest extends IntegrationTest {
 
         assertThat(live()).containsExactlyInAnyOrder("gmail:ana@example.com:t1", "gmail:ana@example.com:t2",
                 "gmail:bob@example.com:b1");
-        assertThat(connector.notes()).containsOnlyKeys(BOB);
-        assertThat(connector.notes().get(BOB)).contains("isn't authorised for bob@example.com");
+        assertThat(connector.notes(tenant.id())).containsOnlyKeys(BOB);
+        assertThat(connector.notes(tenant.id()).get(BOB)).contains("isn't authorised for bob@example.com");
         // The note clears once the mailbox works again.
         gmail.refusals.clear();
         assertThat(sync().failed()).isZero();
-        assertThat(connector.notes()).isEmpty();
+        assertThat(connector.notes(tenant.id())).isEmpty();
     }
 
     @Test
@@ -321,7 +321,7 @@ class GmailSyncTest extends IntegrationTest {
         assertThat(sync()).isEqualTo(new SyncCounts(0, 0, 0, 0, 1));
 
         assertThat(live()).containsExactly("gmail:ana@example.com:t1");
-        assertThat(connector.notes().get(ANA)).contains("this time");
+        assertThat(connector.notes(tenant.id()).get(ANA)).contains("this time");
     }
 
     @Test
@@ -348,7 +348,7 @@ class GmailSyncTest extends IntegrationTest {
         GmailConnection other = new GmailConnection(
                 new TokenCipher(java.util.Base64.getEncoder().encodeToString("another-key-another-key-32-byte".getBytes())),
                 sources, credentials, store);
-        GmailConnector broken = new GmailConnector(gmail, other, store, runs, tenants, 90, Clock.fixed(NOW, ZoneOffset.UTC));
+        GmailConnector broken = new GmailConnector(gmail, other, store, runs, 90, Clock.fixed(NOW, ZoneOffset.UTC));
         gmail.keysSeen.clear();
 
         assertThatThrownBy(() -> broken.sync(tenant.id(), sourceId())).isInstanceOf(SourceAccessException.class)
@@ -364,13 +364,13 @@ class GmailSyncTest extends IntegrationTest {
         choose(box(ANA));
         gmail.keyRejected = true;
 
-        SyncRun run = syncService.run(connector).orElseThrow();
+        SyncRun run = syncService.run(tenant.id(), connector).orElseThrow();
 
         assertThat(run.status()).isEqualTo(SyncRun.FAILED);
         assertThat(run.error()).isEqualTo(HttpGmailClient.KEY_REJECTED);
-        assertThat(connector.status().state()).isEqualTo(State.DOWN);
+        assertThat(connector.status(tenant.id()).state()).isEqualTo(State.DOWN);
         gmail.keyRejected = false;
-        SyncRun ok = syncService.run(connector).orElseThrow();
+        SyncRun ok = syncService.run(tenant.id(), connector).orElseThrow();
         assertThat(ok.status()).isEqualTo(SyncRun.OK);
         assertThat(ok.counts()).isEqualTo(new SyncCounts(1, 0, 0, 0, 0));
     }
@@ -383,22 +383,22 @@ class GmailSyncTest extends IntegrationTest {
         assertThat(connector.kind()).isEqualTo("GMAIL");
         assertThat(connector.visibility()).isEqualTo("SHARED");
 
-        ComponentStatus noMailboxes = connector.status();
+        ComponentStatus noMailboxes = connector.status(tenant.id());
         assertThat(noMailboxes.name()).isEqualTo("Gmail");
         assertThat(noMailboxes.state()).isEqualTo(State.OFF);
         assertThat(noMailboxes.detail()).contains("nothing chosen");
 
         gmail.put(ANA, "t1", "10", "Hello", "hi", T0);
         choose(box(ANA));
-        assertThat(connector.status().detail()).contains("waiting for first sync");
-        syncService.run(connector);
-        assertThat(connector.status().state()).isEqualTo(State.UP);
-        assertThat(connector.status().detail()).contains("1 threads in 1 mailboxes");
+        assertThat(connector.status(tenant.id()).detail()).contains("waiting for first sync");
+        syncService.run(tenant.id(), connector);
+        assertThat(connector.status(tenant.id()).state()).isEqualTo(State.UP);
+        assertThat(connector.status(tenant.id()).detail()).contains("1 threads in 1 mailboxes");
 
         connection.disconnect(tenant.id());
-        assertThat(connector.status().state()).isEqualTo(State.OFF);
-        assertThat(connector.status().detail()).contains("not connected");
-        assertThat(connector.configured()).isFalse();
+        assertThat(connector.status(tenant.id()).state()).isEqualTo(State.OFF);
+        assertThat(connector.status(tenant.id()).detail()).contains("not connected");
+        assertThat(connector.configured(tenant.id())).isFalse();
         assertThat(live()).isEmpty();
     }
 
@@ -420,9 +420,9 @@ class GmailSyncTest extends IntegrationTest {
             choose(box(ANA, "viewer@example.com"), box(BOB), box("carol@example.com"));
             gmail.refusals.put(BOB, "Gmail access isn't authorised for bob@example.com yet.");
             gmail.brokenThreads.add("c1");
-            syncService.run(connector);
+            syncService.run(tenant.id(), connector);
             gmail.keyRejected = true;
-            syncService.run(connector);
+            syncService.run(tenant.id(), connector);
             connection.disconnect(tenant.id());
         } finally {
             root.detachAppender(appender);

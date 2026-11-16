@@ -88,7 +88,7 @@ public class AgentService implements Agent, StatusContributor {
     }
 
     @Override
-    public ComponentStatus status() {
+    public ComponentStatus status(long tenantId) {
         return available()
                 ? ComponentStatus.up(COMPONENT, settings.model())
                 : ComponentStatus.off(COMPONENT, "no API key configured");
