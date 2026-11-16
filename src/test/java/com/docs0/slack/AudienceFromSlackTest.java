@@ -93,12 +93,22 @@ class AudienceFromSlackTest {
 
     @Test
     void docs0ItselfIsNeverPartOfTheAudienceEvenWhenNothingElseIsKnown() throws Exception {
-        slack.members = Set.of("U1", "UBOT");
+        slack.members = Set.of("U1", "U2", "UBOT");
         slack.userInfoFails = true;
 
         ask(CHANNEL, "U1");
 
-        assertThat(lastAudience()).isEqualTo(Audience.of("U1"));
+        assertThat(lastAudience()).isEqualTo(Audience.of("U1", "U2"));
+    }
+
+    @Test
+    void aChannelWithOnlyOnePersonIsNotAPrivateAudienceSoOnlySharedKnowledgeIsUsed() throws Exception {
+        slack.members = Set.of("U1", "UBOT");
+
+        ask(CHANNEL, "U1");
+
+        // More people can join later and read the answer; only a DM is one person's own audience.
+        assertThat(lastAudience()).isEqualTo(Audience.sharedOnly());
     }
 
     @Test
@@ -121,7 +131,8 @@ class AudienceFromSlackTest {
 
         ask(CHANNEL, "U1");
 
-        assertThat(lastAudience()).isEqualTo(Audience.of("U1"));
+        // U2 is known to be deactivated from the stale cache, which leaves one person: shared knowledge only.
+        assertThat(lastAudience()).isEqualTo(Audience.sharedOnly());
     }
 
     @Test

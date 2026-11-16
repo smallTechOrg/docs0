@@ -406,7 +406,13 @@ public class QuestionHandler {
         try {
             Set<String> ids = messenger.channelMembers(q.channel());
             if (ids != null && !ids.isEmpty()) {
-                return people(tenantId, ids);
+                Audience audience = people(tenantId, ids);
+                if (audience.members().size() < 2) {
+                    // A channel with one person (plus bots) is not a private conversation: more people can
+                    // join later and read the answer. Only a DM counts as one person's own audience.
+                    return Audience.sharedOnly();
+                }
+                return audience;
             }
             log.warn("Channel has no listed members, answering from shared knowledge only: channel={}", q.channel());
         } catch (Exception e) {

@@ -156,7 +156,8 @@ one person in a DM. It is built by the Slack layer from `conversations.members`,
 `identity` cache to `(slackUserId, email?)` pairs; bots, deactivated users and docs0 itself are dropped;
 a person Slack cannot describe stays in by id only; if the member list of a channel cannot be read the audience is
 empty, so only shared knowledge is used (everyone in the channel sees the answer, so the asker's own
-access is not enough). DMs and group DMs are never indexed.
+access is not enough). A channel with fewer than two people (not counting bots) is treated as an unknown audience and sees
+shared knowledge only, because more people can join it later. DMs and group DMs are never indexed.
 
 **Eligibility rule.** A restricted document is eligible only if the audience has at least one member
 and every member is covered, where a member is covered when their lowercase Slack id or lowercase email
