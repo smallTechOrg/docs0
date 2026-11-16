@@ -168,7 +168,15 @@ of the whole DM.
   Linear and Trello were added this way in Phase 3.
 - `create_linear_issue` and `create_trello_card` are dedicated tools gated by an explicit
   user request in the thread and a confirm button (delivered in Phase 3, see above).
-- Repeat-question detection for proactive answers: keyword search over past questions,
-  then a cheap model call to judge "same question?" before answering unprompted.
-- Insights (FAQ, gaps) are a scheduled batch job over the interaction log, one call per
-  digest.
+- Repeat-question detection for proactive answers (delivered in Phase 6): keyword search
+  (`websearch_to_tsquery`, OR-style, ranked) over past channel questions that were answered with
+  medium or high confidence and got no 👎, then ONE cheap `oneShot` call with the strict tool
+  `submit_judgement` (`same`, `reason`) before answering unprompted. The answer itself is a normal
+  agent run on the new question with the channel's audience; nothing is replayed. Its cost, like the
+  judge's, is kept in `usage_log` and counts toward the monthly cap.
+- Insights (delivered in Phase 6): themes come from ONE batched `oneShot` call per refresh with the
+  strict tool `submit_themes` (up to 10 `{label, count_estimate, example_index}`), over distinct
+  questions of the period; examples may only be picked from channel questions, while DM and
+  private-source questions are sent without ids. The weekly digest reuses the same result.
+- A stale-document note under the sources is deterministic (date arithmetic in the renderer), never
+  part of the prompt.

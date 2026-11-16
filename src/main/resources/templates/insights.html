@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <title>docs0 insights</title>
+  <th:block th:replace="~{admin/fragments :: styles}"></th:block>
+</head>
+<body>
+<main>
+  <nav th:replace="~{admin/fragments :: nav('insights')}"></nav>
+  <h1>Insights</h1>
+  <p class="sub">What people ask <span th:text="${tenantName}">tenant</span>'s docs0, and where the docs fall short.
+    Questions asked in direct messages are counted but never shown.</p>
+
+  <div class="tabs" id="periods">
+    <a th:each="p : ${periods}" th:href="@{/admin/insights(days=${p})}" th:classappend="${p == days} ? 'on'"
+       th:text="${'Last ' + p + ' days'}">Last 30 days</a>
+  </div>
+
+  <div class="card pad msg notice" th:if="${notice}" th:text="${notice}">Done.</div>
+
+  <h2>Totals</h2>
+  <div class="card pad" id="totals">
+    <p><span class="big" th:text="${totals.questions}">0</span> <span class="sub">questions</span></p>
+    <p>👍 <b th:text="${totals.thumbsUp}">0</b> &nbsp; 👎 <b th:text="${totals.thumbsDown}">0</b>
+      <span class="sub" th:if="${thumbsDownPercent >= 0}">(<span th:text="${thumbsDownPercent}">0</span>% of reactions are 👎)</span>
+      <span class="sub" th:if="${thumbsDownPercent < 0}">(nobody has reacted yet)</span></p>
+    <p>Repeat-question answers offered: <b th:text="${totals.repeatAnswers}">0</b></p>
+    <p>Spend: $<b th:text="${#numbers.formatDecimal(totals.spendUsd, 1, 'COMMA', 2, 'POINT')}">0.00</b>
+      <span class="sub">(answers and insights together)</span></p>
+  </div>
+
+  <h2>Top themes</h2>
+  <div class="card" id="themes">
+    <div class="empty" th:if="${themeStatus == 'NO_QUESTIONS'}">No questions in this period yet.</div>
+    <div class="empty" th:if="${themeStatus == 'NOT_CONFIGURED'}">Themes need docs0's AI model to be connected.</div>
+    <div class="empty" th:if="${themeStatus == 'OVER_BUDGET'}">This month's budget is used up, so themes are not worked out.</div>
+    <div class="empty" th:if="${themeStatus == 'FAILED'}">Themes could not be worked out right now. Try again later.</div>
+    <div class="empty" th:if="${themeStatus == 'OK' and themes.isEmpty()}">No clear themes yet.</div>
+    <div class="item" th:each="t : ${themes}">
+      <p><b th:text="${t.label}">Pricing</b> <span class="badge" th:text="${'about ' + t.count}">about 4</span></p>
+      <p class="sub" th:if="${t.example != null}">For example: <span th:text="${t.example}">example</span></p>
+    </div>
+    <div class="pad" th:if="${themeStatus == 'OK' or themeStatus == 'FAILED'}">
+      <form method="post" action="/admin/insights/refresh" class="actions">
+        <input type="hidden" name="_csrf" th:value="${csrf}">
+        <input type="hidden" name="days" th:value="${days}">
+        <button type="submit">Refresh themes</button>
+        <span class="sub" th:if="${themesAt != null}">Worked out <span th:text="${themesAt}">time</span>. One AI call each time.</span>
+      </form>
+    </div>
+  </div>
+
+  <h2>Knowledge gaps</h2>
+  <p class="sub">Questions with no answer, a low-confidence answer or a 👎. Newest first.</p>
+  <div class="card" id="gaps">
+    <div class="empty" th:if="${gaps.isEmpty() and privateCount == 0}">No gaps in this period.</div>
+    <div class="item" th:each="g : ${gaps}">
+      <p th:if="${g.redacted}"><i>Question not shown (private source)</i></p>
+      <p th:if="${!g.redacted}" th:text="${g.question}">question</p>
+      <p class="sub"><span th:text="${g.reason}">No answer found</span> · <span th:text="${g.when}">1 Nov 2026</span>
+        <span th:if="${g.times > 1}"> · asked <b th:text="${g.times}">2</b> times</span></p>
+    </div>
+    <div class="item" th:if="${gapsMore > 0}"><p class="sub">And <span th:text="${gapsMore}">3</span> more.</p></div>
+    <div class="item" th:if="${privateCount > 0}">
+      <p class="sub"><span th:text="${privateCount}">3</span> <span th:text="${privateCount == 1 ? 'question' : 'questions'}">questions</span> asked privately</p>
+    </div>
+  </div>
+
+  <h2>Old documents people rely on</h2>
+  <p class="sub">Answers that used a document last updated over <span th:text="${staleDays}">365</span> days ago.</p>
+  <div class="card" id="stale">
+    <div class="empty" th:if="${stale.isEmpty()}">No old documents were relied on in this period.</div>
+    <div class="item" th:each="d : ${stale}">
+      <p><a th:if="${d.url != null}" th:href="${d.url}" rel="noopener noreferrer" th:text="${d.title}">Title</a><b
+        th:if="${d.url == null}" th:text="${d.title}">Title</b></p>
+      <p class="sub">Relied on <b th:text="${d.reliedOn}">3</b> <span th:text="${d.reliedOn == 1 ? 'time' : 'times'}">times</span>
+        · last updated <span th:text="${d.updated}">1 Jan 2024</span>
+        · owner: <span th:text="${d.owner != null ? d.owner : 'unknown'}">Asha</span></p>
+      <form method="post" th:action="@{/admin/insights/stale/{id}/ping(id=${d.documentId})}" class="actions">
+        <input type="hidden" name="_csrf" th:value="${csrf}">
+        <input type="hidden" name="days" th:value="${days}">
+        <button type="submit">Ask the owner to review</button>
+        <span class="sub" th:if="${d.pinged != null}">Asked on <span th:text="${d.pinged}">1 Nov 2026</span></span>
+      </form>
+    </div>
+  </div>
+
+  <h2>Repeat questions</h2>
+  <div class="card pad" id="repeat">
+    <p>docs0 offered an answer unprompted <b th:text="${totals.repeatAnswers}">0</b>
+      <span th:text="${totals.repeatAnswers == 1 ? 'time' : 'times'}">times</span> in this period.</p>
+    <p class="sub" th:if="${repeatDownPercent >= 0}"><span th:text="${repeatDownPercent}">0</span>% of them got a 👎.</p>
+    <p class="sub"><a href="/admin/channels">Choose the channels</a> where it may do this.</p>
+  </div>
+
+  <h2>Weekly digest</h2>
+  <div class="card pad" id="digest">
+    <p>docs0 can post a short summary of the last 7 days to a channel every week (Monday morning by default).
+      Nothing is posted until you choose a channel. It never includes direct-message questions, names of people
+      who asked, or anything from private sources, and shows questions from public channels only.</p>
+    <p class="sub" th:if="${digestChannel != ''}">Posting to <b th:text="${'#' + (digestChannelName != null ? digestChannelName : digestChannel)}">#general</b>.
+      <span th:if="${digestLast != null}">Last posted <span th:text="${digestLast}">time</span>.</span></p>
+    <p class="sub" th:if="${digestChannel == ''}">No channel chosen, so no digest is posted.</p>
+    <div class="msg error card pad" th:if="${channelError}" th:text="${channelError}">Slack could not be reached.</div>
+    <form method="post" action="/admin/insights/digest/channel" class="actions" th:if="${channels != null}">
+      <input type="hidden" name="_csrf" th:value="${csrf}">
+      <input type="hidden" name="days" th:value="${days}">
+      <select name="channel">
+        <option value="" th:selected="${digestChannel == ''}">No digest</option>
+        <option th:each="c : ${channels}" th:value="${c.id}" th:selected="${c.chosen}"
+                th:text="${(c.isPrivate ? '🔒 ' : '#') + c.name}">#general</option>
+      </select>
+      <button type="submit">Save</button>
+    </form>
+    <form method="post" action="/admin/insights/digest/now" class="actions" style="margin-top:8px">
+      <input type="hidden" name="_csrf" th:value="${csrf}">
+      <input type="hidden" name="days" th:value="${days}">
+      <button type="submit" th:disabled="${digestChannel == ''}">Post digest now</button>
+    </form>
+    <p class="sub" style="margin-top:8px">docs0 must be in the channel to post. Invite it with <code>/invite @docs0</code>.</p>
+  </div>
+</main>
+</body>
+</html>

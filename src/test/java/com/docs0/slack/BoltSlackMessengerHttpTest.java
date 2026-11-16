@@ -255,6 +255,31 @@ class BoltSlackMessengerHttpTest {
     }
 
     @Test
+    void anOwnerIsFoundByEmailAndAnUnknownEmailIsEmptyNotAnError() {
+        reply("{\"ok\":true,\"user\":{\"id\":\"U7\",\"name\":\"asha\"}}");
+        reply("{\"ok\":false,\"error\":\"users_not_found\"}");
+        reply("{\"ok\":false,\"error\":\"missing_scope\"}");
+
+        assertThat(messenger.lookupByEmail("asha@example.com")).contains("U7");
+        assertThat(messenger.lookupByEmail("nobody@example.com")).isEmpty();
+        assertThatThrownBy(() -> messenger.lookupByEmail("x@example.com")).isInstanceOf(SlackCallException.class)
+                .extracting(e -> ((SlackCallException) e).code()).isEqualTo("missing_scope");
+        assertThat(requests.get(0).method()).isEqualTo("users.lookupByEmail");
+        assertThat(requests.get(0).params()).containsEntry("email", "asha@example.com");
+    }
+
+    @Test
+    void aDirectMessageIsOpenedWithTheUserAndItsChannelIdReturned() {
+        reply("{\"ok\":true,\"channel\":{\"id\":\"D77\"}}");
+        reply("{\"ok\":false,\"error\":\"missing_scope\"}");
+
+        assertThat(messenger.openDm("U7")).isEqualTo("D77");
+        assertThatThrownBy(() -> messenger.openDm("U8")).isInstanceOf(SlackCallException.class);
+        assertThat(requests.get(0).method()).isEqualTo("conversations.open");
+        assertThat(requests.get(0).params()).containsEntry("users", "U7");
+    }
+
+    @Test
     void grantedScopesComeFromTheAuthTestResponseHeader() {
         authResponse = new Resp(200, "{\"ok\":true,\"team\":\"Acme\",\"user\":\"docs0\",\"user_id\":\"UBOT\"}",
                 Map.of("x-oauth-scopes", "chat:write,users:read,users:read.email"));

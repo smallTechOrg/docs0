@@ -73,7 +73,9 @@ class SlackGatewayTest {
                     com.docs0.conversation.InteractionRepository.class,
                     com.docs0.feedback.FeedbackRepository.class, com.docs0.feedback.CorrectionRepository.class,
                     CorrectionDetector.class, CorrectionFlow.class, ReactionHandler.class,
-                    BoltSlackMessenger.class, IdentityService.class, QuestionHandler.class, SlackGateway.class);
+                    BoltSlackMessenger.class, IdentityService.class, com.docs0.budget.UsageLog.class,
+                    com.docs0.settings.ChannelSettings.class, ProactiveOffers.class, ProactiveResponder.class,
+                    com.docs0.stale.StaleDocs.class, QuestionHandler.class, SlackGateway.class);
             context.refresh();
 
             assertThat(context.getBean(SlackMessenger.class)).isInstanceOf(BoltSlackMessenger.class);
@@ -140,8 +142,13 @@ class SlackGatewayTest {
     }
 
     @Test
-    void ignoresTopLevelChannelMessagesAndEdits() {
-        assertThat(SlackGateway.fromMessage(message("C1", "channel", "100.1", null), "Ev1")).isNull();
+    void topLevelChannelMessagesAreCandidatesForRepeatQuestionsButGroupDmsAndEditsAreNot() {
+        IncomingEvent top = SlackGateway.fromMessage(message("C1", "channel", "100.1", null), "Ev1");
+        assertThat(top.kind()).isEqualTo(IncomingEvent.Kind.CHANNEL_MESSAGE);
+        assertThat(top.threadTs()).isNull();
+        assertThat(SlackGateway.fromMessage(message("G1", "group", "100.1", null), "Ev1b").kind())
+                .isEqualTo(IncomingEvent.Kind.CHANNEL_MESSAGE);
+        assertThat(SlackGateway.fromMessage(message("G2", "mpim", "100.1", null), "Ev1c")).isNull();
         assertThat(SlackGateway.fromMessage(message("C1", "channel", "100.1", "100.1"), "Ev2")).isNull();
         MessageEvent edited = message("D1", "im", "200.1", null);
         edited.setEdited(new MessageEvent.Edited());
@@ -186,7 +193,7 @@ class SlackGatewayTest {
                 .containsEntry("messages_tab_read_only_enabled", false);
         assertThat((List<String>) scopes.get("bot")).containsExactlyInAnyOrder("app_mentions:read", "chat:write",
                 "channels:history", "groups:history", "im:history", "mpim:history", "channels:read", "groups:read",
-                "im:read", "mpim:read", "users:read", "users:read.email", "channels:join", "reactions:read");
+                "im:read", "im:write", "mpim:read", "users:read", "users:read.email", "channels:join", "reactions:read");
         assertThat((List<String>) events.get("bot_events")).containsExactlyInAnyOrder("app_mention",
                 "message.channels", "message.groups", "message.im", "message.mpim", "reaction_added", "reaction_removed");
         assertThat(settings).containsEntry("socket_mode_enabled", true);

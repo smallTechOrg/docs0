@@ -9,14 +9,17 @@ import com.docs0.agent.Agent.Confidence;
 import com.docs0.agent.Agent.Exchange;
 import com.docs0.agent.Agent.Kind;
 import com.docs0.budget.BudgetService;
+import com.docs0.budget.UsageLog;
 import com.docs0.conversation.Conversation;
 import com.docs0.conversation.ConversationRepository;
 import com.docs0.conversation.InteractionRepository;
 import com.docs0.knowledge.Audience;
 import com.docs0.knowledge.KnowledgeSearch;
+import com.docs0.stale.StaleDocs;
 import com.docs0.tenant.TenantService;
 import java.math.BigDecimal;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -73,6 +76,10 @@ public class QuestionHandler {
     private final CorrectionFlow corrections;
     private final PendingActionRepository pendingActions;
     private final IdentityService identities;
+    /** Unprompted answers, stale-document notes and the cost of side calls. Null: the feature is off. */
+    private final ProactiveResponder proactive;
+    private final StaleDocs staleDocs;
+    private final UsageLog usage;
     private final long statusIntervalMillis;
 
     private final ExecutorService workers = Executors.newVirtualThreadPerTaskExecutor();
@@ -92,9 +99,18 @@ public class QuestionHandler {
     @Autowired
     public QuestionHandler(TenantService tenants, Agent agent, KnowledgeSearch knowledge, BudgetService budget,
             ConversationRepository conversations, InteractionRepository interactions, SlackMessenger messenger,
+            CorrectionFlow corrections, PendingActionRepository pendingActions, IdentityService identities,
+            ProactiveResponder proactive, StaleDocs staleDocs, UsageLog usage) {
+        this(tenants, agent, knowledge, budget, conversations, interactions, messenger, corrections, pendingActions,
+                identities, proactive, staleDocs, usage, STATUS_INTERVAL);
+    }
+
+    /** Without unprompted answers and stale-document notes. */
+    public QuestionHandler(TenantService tenants, Agent agent, KnowledgeSearch knowledge, BudgetService budget,
+            ConversationRepository conversations, InteractionRepository interactions, SlackMessenger messenger,
             CorrectionFlow corrections, PendingActionRepository pendingActions, IdentityService identities) {
         this(tenants, agent, knowledge, budget, conversations, interactions, messenger, corrections, pendingActions,
-                identities, STATUS_INTERVAL);
+                identities, null, null, null, STATUS_INTERVAL);
     }
 
     /** For tests: {@code statusInterval} is the minimum time between two status line updates. */
@@ -102,6 +118,14 @@ public class QuestionHandler {
             ConversationRepository conversations, InteractionRepository interactions, SlackMessenger messenger,
             CorrectionFlow corrections, PendingActionRepository pendingActions, IdentityService identities,
             Duration statusInterval) {
+        this(tenants, agent, knowledge, budget, conversations, interactions, messenger, corrections, pendingActions,
+                identities, null, null, null, statusInterval);
+    }
+
+    QuestionHandler(TenantService tenants, Agent agent, KnowledgeSearch knowledge, BudgetService budget,
+            ConversationRepository conversations, InteractionRepository interactions, SlackMessenger messenger,
+            CorrectionFlow corrections, PendingActionRepository pendingActions, IdentityService identities,
+            ProactiveResponder proactive, StaleDocs staleDocs, UsageLog usage, Duration statusInterval) {
         this.tenants = tenants;
         this.agent = agent;
         this.knowledge = knowledge;
@@ -112,6 +136,9 @@ public class QuestionHandler {
         this.corrections = corrections;
         this.pendingActions = pendingActions;
         this.identities = identities;
+        this.proactive = proactive;
+        this.staleDocs = staleDocs;
+        this.usage = usage;
         this.statusIntervalMillis = statusInterval.toMillis();
     }
 
@@ -137,6 +164,9 @@ public class QuestionHandler {
         String botUserId = botUserId();
         if (event.user().equals(botUserId)) {
             return DONE;
+        }
+        if (event.kind() == IncomingEvent.Kind.CHANNEL_MESSAGE) {
+            return handleChannelMessage(event, botUserId);
         }
         boolean dm = event.kind() == IncomingEvent.Kind.DIRECT_MESSAGE;
         boolean threadReply = event.kind() == IncomingEvent.Kind.THREAD_REPLY;
@@ -166,6 +196,37 @@ public class QuestionHandler {
                 return;
             }
             answer(tenantId, new Question(event.channel(), replyThreadTs, conversationThreadTs, dm, event.user(), text));
+        });
+    }
+
+    /**
+     * A top-level message in a channel nobody asked docs0 about. Ignored unless it reads like a question and
+     * the channel is opted in; then docs0 may recognise it as a repeat and answer in its thread. Mentions are
+     * left to the mention event, so a mentioned message is never answered twice.
+     */
+    private CompletableFuture<Void> handleChannelMessage(IncomingEvent event, String botUserId) {
+        if (proactive == null || !isBlank(event.threadTs()) || isDmChannel(event.channel())
+                || isBlank(botUserId) || event.text() == null || event.text().contains("<@" + botUserId)) {
+            return DONE;
+        }
+        String text = ProactiveResponder.plainText(event.text());
+        if (!ProactiveResponder.looksLikeQuestion(text)) {
+            return DONE;
+        }
+        if (event.eventId() != null && !seen.add("event:" + event.eventId())) {
+            return DONE;
+        }
+        return enqueue(event.channel(), event.ts(), () -> {
+            long tenantId = tenants.current().id();
+            if (!seen.add("message:" + event.channel() + ":" + event.ts())) {
+                return;
+            }
+            if (!agent.available()) {
+                return;
+            }
+            proactive.consider(tenantId, event.channel(), event.ts(), text).ifPresent(
+                    offer -> answerProactively(tenantId, new Question(event.channel(), event.ts(), event.ts(), false,
+                            event.user(), text), offer));
         });
     }
 
@@ -261,7 +322,8 @@ public class QuestionHandler {
             status.close();
         }
 
-        result = writeFinalMessage(q.channel(), statusTs, result);
+        List<StaleDocs.Stale> stale = staleOf(tenantId, result);
+        result = writeFinalMessage(q.channel(), statusTs, result, StaleDocs.oldest(stale));
 
         if (conversation == null) {
             log.warn("Interaction not logged, no conversation: tenant={} channel={}", tenantId, q.channel());
@@ -271,6 +333,9 @@ public class QuestionHandler {
         try {
             long id = interactions.insert(tenantId, conversation.id(), q.user(), q.text(), result, statusTs);
             link(tenantId, result, id);
+            if (result.kind() == Kind.ANSWER) {
+                recordStale(tenantId, id, stale);
+            }
             log.info("Answered: tenant={} interaction={} kind={} steps={} inputTokens={} outputTokens={} ms={}",
                     tenantId, id, result.kind(), result.steps(), result.inputTokens(), result.outputTokens(),
                     result.durationMs());
@@ -279,6 +344,95 @@ public class QuestionHandler {
                     e.getClass().getName());
         }
         postDrafts(tenantId, q, result);
+    }
+
+    // ---- unprompted answers and stale documents ----------------------------------------------------
+
+    /**
+     * Answers a repeat question the way an @mention would be answered (same audience, so the same access rules),
+     * in a thread on the person's message. Unlike a mention it says nothing at all when anything goes wrong or the
+     * answer is not good enough: no status line, no apology. The cost of an answer that is not shown goes to the
+     * usage log, so the monthly cap still sees it.
+     */
+    private void answerProactively(long tenantId, Question q, ProactiveResponder.Offer offer) {
+        AgentResult result = null;
+        boolean shown = false;
+        try {
+            if (!agent.available() || budget.exhausted(tenantId) || knowledge.count(tenantId) == 0) {
+                return;
+            }
+            Audience audience = audience(tenantId, q);
+            result = agent.answer(new AgentRequest(tenantId, audience, q.text(), List.of()), Agent.ProgressListener.NONE);
+            if (result == null || result.kind() != Kind.ANSWER || result.confidence() == Confidence.LOW
+                    || result.citations() == null || result.citations().isEmpty()
+                    || (result.drafts() != null && !result.drafts().isEmpty())) {
+                log.info("Repeat question not answered: tenant={} channel={} kind={}", tenantId, q.channel(),
+                        result == null ? null : result.kind());
+                return;
+            }
+            List<StaleDocs.Stale> stale = staleOf(tenantId, result);
+            AnswerRenderer.Rendered rendered = AnswerRenderer.render(result, ProactiveResponder.LEAD,
+                    StaleDocs.oldest(stale));
+            String ts;
+            try {
+                ts = messenger.postMessage(q.channel(), q.replyThreadTs(), rendered.text(), rendered.blocks());
+            } catch (Exception e) {
+                log.warn("Answer layout rejected, sending plain text: channel={} error={}", q.channel(), reason(e));
+                ts = messenger.postMessage(q.channel(), q.replyThreadTs(), rendered.text(), null);
+            }
+            shown = true;
+            Conversation conversation = conversation(tenantId, q);
+            long id = interactions.insert(tenantId, conversation.id(), q.user(), q.text(), result, ts);
+            proactive.answered(tenantId, offer, id);
+            recordStale(tenantId, id, stale);
+            log.info("Answered a repeat question: tenant={} interaction={} offer={} inputTokens={} outputTokens={}",
+                    tenantId, id, offer.offerId(), result.inputTokens(), result.outputTokens());
+        } catch (Exception e) {
+            log.warn("Repeat question not answered: tenant={} channel={} error={}", tenantId, q.channel(), reason(e));
+        } finally {
+            if (result != null && !shown) {
+                discardDrafts(tenantId, result);
+                recordUsage(tenantId, result);
+            }
+        }
+    }
+
+    /** The cost of an unprompted answer that was not shown, so the monthly cap counts it. */
+    private void recordUsage(long tenantId, AgentResult result) {
+        if (usage == null) {
+            return;
+        }
+        try {
+            usage.record(tenantId, UsageLog.PROACTIVE_ANSWER, result.inputTokens(), result.outputTokens(),
+                    result.costUsd() == null ? BigDecimal.ZERO : result.costUsd());
+        } catch (RuntimeException e) {
+            log.warn("Cost not logged: tenant={} error={}", tenantId, e.getClass().getName());
+        }
+    }
+
+    /** The stale documents among an answer's citations. Never fails: no note is better than no answer. */
+    private List<StaleDocs.Stale> staleOf(long tenantId, AgentResult result) {
+        if (staleDocs == null || result == null || result.kind() != Kind.ANSWER) {
+            return List.of();
+        }
+        try {
+            return staleDocs.staleAmong(tenantId, result.citations());
+        } catch (RuntimeException e) {
+            log.warn("Stale documents not checked: tenant={} error={}", tenantId, e.getClass().getName());
+            return List.of();
+        }
+    }
+
+    private void recordStale(long tenantId, long interactionId, List<StaleDocs.Stale> stale) {
+        if (staleDocs == null || stale.isEmpty()) {
+            return;
+        }
+        try {
+            staleDocs.record(tenantId, interactionId, stale);
+        } catch (RuntimeException e) {
+            log.warn("Stale documents not recorded: tenant={} interaction={} error={}", tenantId, interactionId,
+                    e.getClass().getName());
+        }
     }
 
     /** Ties the drafts of an answer to the interaction that produced them. */
@@ -351,10 +505,10 @@ public class QuestionHandler {
      * Replaces the status message with the answer, or with an apology when answering failed.
      * Returns the result to log: unchanged, or an error if the answer could not be shown.
      */
-    private AgentResult writeFinalMessage(String channel, String statusTs, AgentResult result) {
+    private AgentResult writeFinalMessage(String channel, String statusTs, AgentResult result, Instant staleSince) {
         if (result.kind() != Kind.ERROR) {
             try {
-                AnswerRenderer.Rendered rendered = AnswerRenderer.render(result);
+                AnswerRenderer.Rendered rendered = AnswerRenderer.render(result, null, staleSince);
                 try {
                     messenger.updateMessage(channel, statusTs, rendered.text(), rendered.blocks());
                 } catch (Exception e) {

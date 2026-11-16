@@ -76,4 +76,17 @@ class CostsPageTest extends IntegrationTest {
         assertThat(html).doesNotContain("<script>alert").contains("&lt;script&gt;alert(1)&lt;/script&gt;")
                 .doesNotContain("THE-END");
     }
+
+    @Test
+    void otherModelCallsAreOwnLineAndCountInTheMonthTotal() throws Exception {
+        Conversation thread = TestData.conversation(jdbc, tenant.id(), "C1", "1.1", false);
+        TestData.interaction(jdbc, thread, "U1", "A question?", "a", "9.1", "2.00");
+        new com.docs0.budget.UsageLog(jdbc).record(tenant.id(), "themes", 1000, 100, new java.math.BigDecimal("0.75"));
+
+        String t = text(page());
+
+        assertThat(t).contains("$2.75").contains("Answering questions $2.00")
+                .contains("Other model calls (repeat-question checks and insights themes) $0.75")
+                .contains("in the last 30 days (not in the table above): $0.75");
+    }
 }

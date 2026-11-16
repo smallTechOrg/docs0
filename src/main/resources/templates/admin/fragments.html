@@ -81,7 +81,9 @@
 <nav class="top" th:fragment="nav(active)">
   <a class="brand" href="/">docs0</a>
   <a href="/admin/sources" th:classappend="${active == 'sources'} ? 'on'">Sources</a>
+  <a href="/admin/channels" th:classappend="${active == 'channels'} ? 'on'">Channels</a>
   <a href="/admin/corrections" th:classappend="${active == 'corrections'} ? 'on'">Corrections</a>
+  <a href="/admin/insights" th:classappend="${active == 'insights'} ? 'on'">Insights</a>
   <a href="/admin/costs" th:classappend="${active == 'costs'} ? 'on'">Costs</a>
 </nav>
 </body>

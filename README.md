@@ -7,9 +7,10 @@ docs0 does not use vector search or embeddings. Claude searches a keyword index,
 whole documents, and answers only from what it read. Every quote in an answer is checked
 against the source document before it is shown.
 
-**Status:** Phase 5 — answers from Google Drive, Linear, Trello, Grain, Slack history and Gmail
-(each mailbox private to its owner), and can file a Linear issue or Trello card when asked (after the
-asker confirms). See [spec/roadmap.md](spec/roadmap.md).
+**Status:** Phase 6 — answers from Google Drive, Linear, Trello, Grain, Slack history and Gmail
+(each mailbox private to its owner), can file a Linear issue or Trello card when asked (after the
+asker confirms), answers repeat questions in channels you opt in, flags answers that lean on old
+documents, and reports what people ask (Insights, weekly digest). See [spec/roadmap.md](spec/roadmap.md).
 
 ## What you need
 
@@ -254,6 +255,25 @@ it writes is a **new** issue or card, and only like this:
 The tools to draft are offered to the model only when that tool is connected and has a team
 or board chosen. If a create fails, docs0 says so and records the error; it does not retry.
 
+### Repeat-question answers, stale documents and Insights (Phase 6)
+
+Everything here is off or silent until you turn it on, and none of it needs a new key. The new
+settings are optional:
+
+| Variable | Default | What it does |
+| --- | --- | --- |
+| `DOCS0_PROACTIVE_MAX_PER_HOUR` | `3` | Most unprompted answers per opted-in channel per hour. |
+| `DOCS0_STALE_DAYS` | `365` | An answer that cites a document last updated longer ago than this says it may be out of date. |
+| `DOCS0_DIGEST_CRON` | `0 0 9 * * MON` | When the weekly digest is posted (Spring cron: second minute hour day month weekday). `-` turns the schedule off. |
+| `DOCS0_TIMEZONE` | `UTC` | Time zone of that schedule, for example `Europe/London`. |
+
+**One-time step if you created the Slack app before Phase 6.** Asking a document's owner to review
+it opens a direct message with them, which needs the `im:write` bot scope (added to
+[slack/manifest.yml](slack/manifest.yml)). Paste the current manifest again (*App Manifest* in the
+app settings, save) and **reinstall the app** (*Install App → Reinstall to Workspace*); the bot token
+stays the same. Until then everything else works and only the "Ask the owner to review" button says
+that Slack did not accept the message.
+
 ## Run
 
 ```
@@ -289,6 +309,34 @@ what is not set up.
 
 Each answer lists its sources with the exact passage it relied on. When docs0 is unsure
 it says so, asks a clarifying question, or names who might know.
+
+- **Repeat questions.** On the **Channels** page (`/admin/channels`) tick the channels where docs0
+  may answer without being asked. Nothing is ticked by default. In a ticked channel, when someone
+  posts a question that docs0 has already answered in a channel before, docs0 replies in a thread on
+  that message with "This looks like something we've covered before. Here's what I found:" and a fresh
+  answer from your current sources and approved corrections (never a copy of the old one). It speaks up
+  at most `DOCS0_PROACTIVE_MAX_PER_HOUR` times an hour per channel, with a two-minute pause between
+  answers, never in a direct message, never on a message that already has replies, and only when it is
+  confident. It uses the same rules about who may see which documents as an @mention. A 👎 on one of
+  these answers counts like any other and keeps docs0 quiet in that channel for a day. Questions asked in
+  direct messages are never used to recognise repeats.
+- **Old documents.** When an answer cites a document last updated more than `DOCS0_STALE_DAYS` days ago,
+  a line under the sources says "Based on a document last updated March 2023. It may be out of date."
+- **Insights.** The **Insights** page (`/admin/insights`, 7, 30 or 90 days) shows totals (questions,
+  👍 and 👎, how many repeat answers were offered, spend), the top question **themes** (one AI call,
+  kept for six hours; **Refresh themes** repeats it at most every ten minutes), **knowledge gaps**
+  (questions with no answer, low confidence or a 👎, with how often a similar one came up), the old
+  documents people rely on, and how repeat answers were received. For each old document, **Ask the
+  owner to review** sends the owner (found in Slack by email) a short direct message, at most once
+  per document in 14 days; docs0 never does this by itself. Direct-message questions are only counted,
+  never shown or quoted, and a question whose answer used a private source (a private channel, a
+  mailbox) is shown as "Question not shown (private source)".
+- **Weekly digest.** On the Insights page choose a channel (and invite `@docs0` to it); docs0 then posts
+  a short summary of the last 7 days there on `DOCS0_DIGEST_CRON`, once a week, and **Post digest now**
+  sends one immediately. Nothing is posted until a channel is chosen, or when this month's budget is used
+  up. The digest never contains direct-message questions, who asked, private-source content or
+  questions from private channels. The AI calls behind repeat-question checks and themes are billed to the
+  monthly cap too; the **Costs** page shows them on their own line.
 
 ## Test
 

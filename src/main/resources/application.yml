@@ -50,6 +50,17 @@ docs0:
     # OAuth client an admin signs in through on the Sources page.
     oauth-client-id: ${DOCS0_GOOGLE_OAUTH_CLIENT_ID:}
     oauth-client-secret: ${DOCS0_GOOGLE_OAUTH_CLIENT_SECRET:}
+  proactive:
+    # Most unprompted repeat-question answers per channel per hour (only in channels an admin opted in).
+    max-per-hour: ${DOCS0_PROACTIVE_MAX_PER_HOUR:3}
+  stale:
+    # An answer that cites a document last updated more than this many days ago says it may be out of date.
+    days: ${DOCS0_STALE_DAYS:365}
+  digest:
+    # When the weekly digest is posted (Spring cron: second minute hour day month weekday). "-" turns it off.
+    cron: ${DOCS0_DIGEST_CRON:0 0 9 * * MON}
+    # Time zone of the cron schedule.
+    zone: ${DOCS0_TIMEZONE:UTC}
   # Base64 of 32 random bytes. Encrypts the stored Google grant.
   encryption-key: ${DOCS0_ENCRYPTION_KEY:}
   # Where a browser reaches this app. The Google redirect URI is <public-url>/admin/sources/google/callback.

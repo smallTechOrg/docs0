@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <title>docs0 channels</title>
+  <th:block th:replace="~{admin/fragments :: styles}"></th:block>
+</head>
+<body>
+<main>
+  <nav th:replace="~{admin/fragments :: nav('channels')}"></nav>
+  <h1>Channels</h1>
+  <p class="sub">Where docs0 may answer repeat questions without being asked.</p>
+
+  <div class="card pad msg notice" th:if="${notice}" th:text="${notice}">Saved.</div>
+  <div class="card pad msg error" th:if="${error}" th:text="${error}">Something went wrong.</div>
+
+  <h2>Answer repeat questions</h2>
+  <div class="card pad">
+    <p>Tick a channel and docs0 will answer there when someone asks something it has been asked before. It
+      only speaks up when it has answered a very similar question in a channel before, and at most
+      <b th:text="${maxPerHour}">3</b> times an hour per channel. It answers in a thread on the question, from
+      your current sources, and says why. Anyone can switch it off for a day by giving its answer a 👎.</p>
+    <p class="sub">Nothing is ticked until you do it. Direct messages are never answered this way.</p>
+  </div>
+
+  <div class="card pad msg error" th:if="${loadError}" th:text="${loadError}">Slack could not be reached.</div>
+  <form method="post" action="/admin/channels" th:if="${channels != null}">
+    <input type="hidden" name="_csrf" th:value="${csrf}">
+    <div class="card" id="channels" style="margin-top:12px">
+      <div class="empty" th:if="${channels.isEmpty()}">docs0 can't see any channels yet. Invite it to a channel first.</div>
+      <label class="row" th:each="c : ${channels}" style="cursor:pointer">
+        <input type="checkbox" name="proactive" th:value="${c.id}" th:checked="${c.proactive}">
+        <span class="name"><span th:text="${(c.isPrivate ? '🔒 ' : '#') + c.name}">#general</span></span>
+        <span class="detail" th:if="${!c.member}">docs0 is not in this channel yet</span>
+      </label>
+    </div>
+    <p style="margin-top:12px"><button class="primary" type="submit">Save</button></p>
+  </form>
+</main>
+</body>
+</html>

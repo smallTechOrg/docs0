@@ -52,8 +52,8 @@ public final class AnswerRenderer {
     static final int MAX_QUOTE_CHARS = 300;
     private static final int MAX_TITLE_CHARS = 150;
     private static final int MAX_PEOPLE = 3;
-    // 40 answer + note + divider + 6 sources + people + buttons = 50 blocks at most.
-    private static final int MAX_ANSWER_SECTIONS = 40;
+    // lead + 38 answer + note + divider + 6 sources + stale note + people + buttons = 50 blocks at most.
+    private static final int MAX_ANSWER_SECTIONS = 38;
     private static final int MAX_SOURCE_SECTIONS = 6;
 
     private static final Pattern HEADING = Pattern.compile("^\\s{0,3}#{1,6}\\s+(.*?)\\s*#*\\s*$");
@@ -75,6 +75,32 @@ public final class AnswerRenderer {
     private AnswerRenderer() {}
 
     public static Rendered render(AgentResult result) {
+        return render(result, null, null);
+    }
+
+    /** The note under the sources of an answer that relies on an old document. {@code month} is like "March 2023". */
+    static String staleNote(String month) {
+        return ":hourglass: Based on a document last updated " + month + ". It may be out of date.";
+    }
+
+    /**
+     * Renders the answer. {@code lead}, when not null, is a line shown above it (the unprompted answer's
+     * introduction). {@code staleSince}, when not null, is the modification date of the oldest stale document the
+     * answer cites; a one-line note under the sources then says so.
+     */
+    public static Rendered render(AgentResult result, String lead, java.time.Instant staleSince) {
+        Rendered rendered = renderAnswer(result, staleSince);
+        if (isBlank(lead)) {
+            return rendered;
+        }
+        List<LayoutBlock> blocks = new ArrayList<>();
+        blocks.add(mrkdwnSection(escape(lead)));
+        blocks.addAll(rendered.blocks());
+        String text = lead + "\n" + rendered.text();
+        return new Rendered(truncate(text, MAX_TEXT_CHARS), List.copyOf(blocks));
+    }
+
+    private static Rendered renderAnswer(AgentResult result, java.time.Instant staleSince) {
         String answer = toMrkdwn(result.answer());
         if (answer.isBlank()) {
             answer = EMPTY_ANSWER;
@@ -100,6 +126,9 @@ public final class AnswerRenderer {
                 List<String> sourceParts = split(sources(citations), MAX_SECTION_CHARS);
                 for (String part : sourceParts.subList(0, Math.min(sourceParts.size(), MAX_SOURCE_SECTIONS))) {
                     blocks.add(mrkdwnSection(part));
+                }
+                if (staleSince != null) {
+                    blocks.add(context(List.of(markdownText(staleNote(com.docs0.stale.StaleDocs.month(staleSince))))));
                 }
             }
         }
@@ -264,7 +293,7 @@ public final class AnswerRenderer {
     }
 
     /** Escapes the three characters Slack treats as control characters. Already-escaped entities are kept. */
-    static String escape(String text) {
+    public static String escape(String text) {
         if (text == null) {
             return "";
         }

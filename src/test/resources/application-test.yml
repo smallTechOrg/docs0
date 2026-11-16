@@ -3,6 +3,10 @@
 spring:
   datasource:
     url: ${DOCS0_TEST_DATABASE_URL:jdbc:postgresql://localhost:5432/docs0_test}
+    hikari:
+      # Many cached application contexts share one small Postgres: keep idle connections to a minimum.
+      minimum-idle: 1
+      maximum-pool-size: 6
   flyway:
     clean-disabled: false
 
@@ -26,6 +30,13 @@ docs0:
     days: 30
   gmail:
     days: 7
+  proactive:
+    max-per-hour: 3
+  stale:
+    days: 365
+  digest:
+    cron: "-"
+    zone: UTC
   google:
     oauth-client-id: ""
     oauth-client-secret: ""

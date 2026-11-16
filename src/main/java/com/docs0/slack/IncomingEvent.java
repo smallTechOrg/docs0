@@ -25,7 +25,9 @@ public record IncomingEvent(
         /** Any message in a DM with docs0. */
         DIRECT_MESSAGE,
         /** A reply without a mention in a channel thread. */
-        THREAD_REPLY
+        THREAD_REPLY,
+        /** A top-level message in a public or private channel that does not mention docs0. */
+        CHANNEL_MESSAGE
     }
 
     /** A normal message written by a person. */

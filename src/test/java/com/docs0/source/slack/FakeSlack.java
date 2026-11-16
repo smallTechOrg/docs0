@@ -55,6 +55,10 @@ public final class FakeSlack implements SlackMessenger {
         failingMembers.clear();
         permalinksFail = false;
         listFails = false;
+        lookupFails = false;
+        postsFail = false;
+        dmsOpened.clear();
+        sent.clear();
         scopes = Set.of();
     }
 
@@ -173,6 +177,29 @@ public final class FakeSlack implements SlackMessenger {
         return scopes;
     }
 
+    /** Set to make the next email lookup or DM fail, like a Slack outage. */
+    public volatile boolean lookupFails;
+    public final List<String> dmsOpened = new CopyOnWriteArrayList<>();
+    /** Messages posted with {@link #postMessage}: channel, thread, text. */
+    public record Sent(String channel, String threadTs, String text, List<LayoutBlock> blocks) {}
+    public final List<Sent> sent = new CopyOnWriteArrayList<>();
+    public volatile boolean postsFail;
+
+    @Override
+    public java.util.Optional<String> lookupByEmail(String email) {
+        if (lookupFails) {
+            throw new SlackCallException("users.lookupByEmail", "internal_error", null);
+        }
+        return users.values().stream().filter(u -> u.email() != null && u.email().equalsIgnoreCase(email))
+                .map(SlackUser::id).findFirst();
+    }
+
+    @Override
+    public String openDm(String userId) {
+        dmsOpened.add(userId);
+        return "D" + userId;
+    }
+
     @Override
     public Set<String> channelMembers(String channel) {
         if (failingMembers.contains(channel)) {
@@ -188,7 +215,11 @@ public final class FakeSlack implements SlackMessenger {
 
     @Override
     public String postMessage(String channel, String threadTs, String text, List<LayoutBlock> blocks) {
-        throw new UnsupportedOperationException();
+        if (postsFail) {
+            throw new SlackCallException("chat.postMessage", "not_in_channel", null);
+        }
+        sent.add(new Sent(channel, threadTs, text, blocks));
+        return "7000.%04d".formatted(sent.size());
     }
 
     @Override

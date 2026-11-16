@@ -8,7 +8,8 @@ import java.util.List;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Service;
 
-/** What the questions cost: per day and the dearest of the month. Reads the interaction log. */
+/** What the questions cost: per day and the dearest of the month. Reads the interaction log; the model calls
+ * that are not a question (usage log) are reported as their own line. */
 @Service
 public class CostReport {
 
@@ -39,6 +40,17 @@ public class CostReport {
                 .query((rs, n) -> new Day(rs.getObject("day", LocalDate.class), rs.getLong("questions"),
                         rs.getLong("input_tokens"), rs.getLong("output_tokens"), rs.getBigDecimal("cost_usd")))
                 .list();
+    }
+
+    /** What the model calls that are not a question cost in the last {@code days} UTC days (today included). */
+    public BigDecimal otherSpend(long tenantId, int days) {
+        var from = LocalDate.now(ZoneOffset.UTC).minusDays(days - 1L).atStartOfDay().atOffset(ZoneOffset.UTC);
+        return jdbc.sql("""
+                        SELECT coalesce(sum(cost_usd), 0) FROM usage_log
+                        WHERE tenant_id = :tenantId AND created_at >= :from
+                        """)
+                .param("tenantId", tenantId).param("from", from)
+                .query(BigDecimal.class).single();
     }
 
     /** The questions that cost the most this calendar month (UTC), dearest first. */

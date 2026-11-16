@@ -248,9 +248,53 @@ person's email is unknown their mail is hidden from them.
 ## C10. Proactive and insights (Phase 6)
 
 In opted-in channels docs0 offers an answer when it recognises a repeat question. It
-flags answers that rely on a stale or contradicted document and notes the owner. A
-scheduled digest reports top questions, unanswered questions and gaps; DM questions are
-counted without attribution.
+flags answers that rely on a stale document and lets an admin nudge the owner. Insights
+(a dashboard page and an optional weekly digest) report top themes, knowledge gaps and the
+stale documents people rely on; DM questions are counted without attribution.
+
+**Repeat-question answers.**
+
+- Opt-in per channel on `/admin/channels` (`channel_setting.proactive`, default off).
+- Considered only for a top-level message in an opted-in channel: not a thread reply, a bot,
+  a subtype, an @mention, a DM or group DM, nor a message that already has replies; and only when it reads
+  like a question (contains `?` or starts with a question word, 4 to 600 characters, not just a
+  link).
+- Gates: monthly budget not used up, at most `DOCS0_PROACTIVE_MAX_PER_HOUR` offers per channel
+  per hour, two minutes between offers, a bounded number of judged messages per channel per hour, a
+  channel is quiet for a day after a 👎 on one of its unprompted answers, and one `proactive_offer` row per
+  message (never twice).
+- Candidates: full-text match (OR-style, ranked, minimum rank, top 3) against past questions of the tenant
+  that were asked in a channel, answered (kind ANSWER) with MEDIUM or HIGH confidence, got no 👎, did not
+  use a private source, and were not asked in the same thread. DM questions are never the corpus. A question
+  whose unprompted answer got a 👎 is retired as a candidate.
+- If there are candidates, one cheap model call (`submit_judgement`: `same`, `reason`) decides whether the new
+  message is essentially the same question. Its cost goes to `usage_log`, which counts toward the cap.
+- If yes, the normal agent runs on the new question with the channel's audience (the same access rules as an
+  @mention). The answer is posted in a thread on the person's message under the lead line "This looks like
+  something we've covered before. Here's what I found:", logged as an interaction (so reactions and
+  follow-ups work) and linked from the offer. It is posted only when it is an ANSWER with sources and at least
+  medium confidence; otherwise docs0 says nothing (no status line, no apology) and the cost goes to `usage_log`.
+  Any failure at any step means silence.
+
+**Stale documents.** After an answer that cites documents, each cited document whose `modified_at` is
+older than `DOCS0_STALE_DAYS` (default 365) is recorded in `stale_flag` (once per answer and document; private
+documents are not recorded). The renderer, not the model, adds under the sources: ":hourglass: Based on a
+document last updated <month year>. It may be out of date." using the oldest stale cited document. On the
+Insights page an admin can press **Ask the owner to review**: the owner's email is resolved to a Slack user
+(`users.lookupByEmail`) and sent a short DM with the title, date and link, at most once per document in 14
+days; if the owner cannot be resolved the page says so. Admin-initiated only.
+
+**Insights** (`/admin/insights`, last 7, 30 or 90 days): totals, top themes (one batched model call over at
+most 300 distinct questions of 200 characters each, cached six hours in `tenant_setting`, **Refresh** at most every ten
+minutes; DM and private-source questions are sent without ids so they count but are never quoted or chosen
+as examples), knowledge gaps (UNKNOWN, LOW confidence or 👎; grouped by normalised text with a count; DM
+questions shown only as "N questions asked privately", private-source questions as "Question not shown (private
+source)"), stale documents people rely on, and repeat-question stats.
+
+**Weekly digest.** `@Scheduled` on `DOCS0_DIGEST_CRON` in `DOCS0_TIMEZONE`, posted to the channel stored in
+`tenant_setting` (nothing until an admin picks one), once per week, skipped when the budget is used up;
+**Post digest now** posts at once. It holds totals, themes with counts, the top 5 gaps (public-channel questions
+only) and the top 5 stale documents; never DM text, asker ids, private-source content or private-channel questions.
 
 ## C11. Multi-tenant onboarding (Phase 7)
 

@@ -23,6 +23,10 @@
         <span th:if="${percent >= 100}" class="DOWN">The cap is used up, so docs0 is not answering new questions.</span></span>
     </th:block>
     <span class="sub" th:if="${cap == null}">No monthly cap is set.</span>
+    <p class="sub" id="split" style="margin-top:10px">Answering questions $<span
+      th:text="${#numbers.formatDecimal(questionSpent, 1, 'COMMA', 2, 'POINT')}">0.00</span>. Other model calls
+      (repeat-question checks and insights themes) $<span
+      th:text="${#numbers.formatDecimal(otherSpent, 1, 'COMMA', 2, 'POINT')}">0.00</span>.</p>
   </div>
 
   <h2>Last <span th:text="${dayCount}">30</span> days</h2>
@@ -41,6 +45,9 @@
       </tbody>
     </table>
   </div>
+
+  <p class="sub" id="other30">Other model calls in the last <span th:text="${dayCount}">30</span> days (not in the table
+    above): $<span th:text="${#numbers.formatDecimal(otherSpent30, 1, 'COMMA', 2, 'POINT')}">0.00</span>.</p>
 
   <h2>Most expensive questions this month</h2>
   <div class="card" id="top">

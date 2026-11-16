@@ -125,6 +125,58 @@ public class InteractionRepository {
                 .update();
     }
 
+    /** A past question that looks like a new one. */
+    public record SimilarQuestion(long id, double rank) {}
+
+    /**
+     * Past questions of the tenant that look like {@code question}, best first: asked in a channel (never a DM),
+     * answered (kind ANSWER) with MEDIUM or HIGH confidence, without a 👎, without a private source, and not
+     * asked in the thread {@code (excludeChannel, excludeThreadTs)}. Any shared word counts (like the
+     * corrections matcher) and more shared words rank higher; matches ranked below {@code minRank} are dropped.
+     */
+    public List<SimilarQuestion> similarAnswered(long tenantId, String question, String excludeChannel,
+            String excludeThreadTs, double minRank, int limit) {
+        if (question == null || question.isBlank() || limit <= 0) {
+            return List.of();
+        }
+        return jdbc.sql("""
+                        SELECT i.id, ts_rank(i.question_search, m.q) AS rank
+                        FROM interaction i
+                        JOIN conversation c ON c.id = i.conversation_id AND c.tenant_id = i.tenant_id,
+                             (SELECT replace(websearch_to_tsquery('english', :question)::text, ' & ', ' | ')::tsquery AS q) m
+                        WHERE i.tenant_id = :tenantId AND NOT c.is_dm
+                          AND i.kind = 'ANSWER' AND i.confidence IN ('MEDIUM', 'HIGH') AND NOT i.used_restricted
+                          AND i.question_search @@ m.q
+                          AND NOT (c.channel_id = :channel AND c.thread_ts = :threadTs)
+                          AND ts_rank(i.question_search, m.q) >= :minRank
+                          AND NOT EXISTS (SELECT 1 FROM feedback f WHERE f.tenant_id = i.tenant_id
+                                          AND f.interaction_id = i.id AND f.rating = 'DOWN')
+                          AND NOT EXISTS (SELECT 1 FROM proactive_offer o
+                                          JOIN feedback f ON f.tenant_id = o.tenant_id AND f.interaction_id = o.interaction_id
+                                                         AND f.rating = 'DOWN'
+                                          WHERE o.tenant_id = i.tenant_id AND o.matched_interaction_id = i.id)
+                        ORDER BY rank DESC, i.id DESC
+                        LIMIT :limit
+                        """)
+                .param("tenantId", tenantId).param("question", question).param("channel", excludeChannel)
+                .param("threadTs", excludeThreadTs).param("minRank", minRank).param("limit", limit)
+                .query((rs, n) -> new SimilarQuestion(rs.getLong("id"), rs.getDouble("rank")))
+                .list();
+    }
+
+    /** The text of past questions, by id, for the ones that belong to the tenant. */
+    public java.util.Map<Long, String> questionTexts(long tenantId, Collection<Long> ids) {
+        java.util.Map<Long, String> texts = new java.util.LinkedHashMap<>();
+        if (ids == null || ids.isEmpty()) {
+            return texts;
+        }
+        jdbc.sql("SELECT id, question FROM interaction WHERE tenant_id = :tenantId AND id IN (:ids) ORDER BY id")
+                .param("tenantId", tenantId).param("ids", List.copyOf(ids))
+                .query((rs, n) -> new java.util.AbstractMap.SimpleEntry<>(rs.getLong("id"), rs.getString("question")))
+                .list().forEach(e -> texts.put(e.getKey(), e.getValue()));
+        return texts;
+    }
+
     private static final String LOGGED = """
             SELECT i.id, i.conversation_id, c.thread_ts, c.is_dm, i.question, i.answer
             FROM interaction i JOIN conversation c ON c.id = i.conversation_id AND c.tenant_id = i.tenant_id

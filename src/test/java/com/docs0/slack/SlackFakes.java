@@ -174,6 +174,16 @@ final class SlackFakes {
             return scopes;
         }
 
+        @Override
+        public java.util.Optional<String> lookupByEmail(String email) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public String openDm(String userId) {
+            throw new UnsupportedOperationException();
+        }
+
         Posted onlyPost() {
             if (posts.size() != 1) {
                 throw new AssertionError("expected exactly one posted message but got " + posts);

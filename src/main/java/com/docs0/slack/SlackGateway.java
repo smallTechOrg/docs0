@@ -248,8 +248,9 @@ public class SlackGateway implements StatusContributor {
     }
 
     /**
-     * A plain message event. A DM is always a candidate; in channels only thread replies
-     * are (top-level channel messages matter only as mentions). Null otherwise.
+     * A plain message event. A DM is always a candidate; in channels thread replies are, and so are
+     * top-level messages (docs0 only ever looks at those in channels an admin opted in, and mentions are
+     * left to the mention event). Null otherwise, including group DMs.
      */
     static IncomingEvent fromMessage(MessageEvent e, String eventId) {
         if (e == null || e.getEdited() != null) {
@@ -260,11 +261,14 @@ public class SlackGateway implements StatusContributor {
             kind = IncomingEvent.Kind.DIRECT_MESSAGE;
         } else if (e.getThreadTs() != null && !e.getThreadTs().equals(e.getTs())) {
             kind = IncomingEvent.Kind.THREAD_REPLY;
+        } else if (e.getThreadTs() == null
+                && ("channel".equals(e.getChannelType()) || "group".equals(e.getChannelType()))) {
+            kind = IncomingEvent.Kind.CHANNEL_MESSAGE;
         } else {
             return null;
         }
         return new IncomingEvent(kind, e.getChannel(), e.getUser(), e.getText(), e.getTs(), e.getThreadTs(), eventId,
-                null, e.getBotId() != null);
+                e.getSubtype(), e.getBotId() != null);
     }
 
     /** A reaction added to a message. Null when it was not added to a message. */

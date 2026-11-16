@@ -242,6 +242,30 @@ public class BoltSlackMessenger implements SlackMessenger {
     }
 
     @Override
+    public java.util.Optional<String> lookupByEmail(String email) {
+        try {
+            var user = call("users.lookupByEmail", () -> client.usersLookupByEmail(r -> r.email(email))).getUser();
+            return user == null || user.getId() == null ? java.util.Optional.empty()
+                    : java.util.Optional.of(user.getId());
+        } catch (SlackCallException e) {
+            if ("users_not_found".equals(e.code())) {
+                return java.util.Optional.empty();
+            }
+            throw e;
+        }
+    }
+
+    @Override
+    public String openDm(String userId) {
+        var channel = call("conversations.open", () -> client.conversationsOpen(r -> r.users(List.of(userId))))
+                .getChannel();
+        if (channel == null || channel.getId() == null) {
+            throw new SlackCallException("conversations.open", "no_channel", null);
+        }
+        return channel.getId();
+    }
+
+    @Override
     public Set<String> botScopes() {
         Set<String> known = scopes;
         if (known == null) {

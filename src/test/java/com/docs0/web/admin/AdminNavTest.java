@@ -16,7 +16,8 @@ import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilde
 @AutoConfigureMockMvc
 class AdminNavTest extends IntegrationTest {
 
-    private static final String[] PAGES = {"/admin/sources", "/admin/corrections", "/admin/costs"};
+    private static final String[] PAGES = {"/admin/sources", "/admin/channels", "/admin/corrections", "/admin/insights",
+            "/admin/costs"};
 
     @Autowired
     MockMvc mvc;
@@ -34,7 +35,8 @@ class AdminNavTest extends IntegrationTest {
             String html = mvc.perform(get(page)).andExpect(status().isOk()).andReturn().getResponse()
                     .getContentAsString();
             assertThat(html).as(page).contains("href=\"/admin/sources\"").contains("href=\"/admin/corrections\"")
-                    .contains("href=\"/admin/costs\"");
+                    .contains("href=\"/admin/costs\"").contains("href=\"/admin/channels\"")
+                    .contains("href=\"/admin/insights\"");
             assertThat(html).as(page).contains("<a href=\"" + page + "\" class=\"on\">");
             assertThat(html).as(page).contains("prefers-color-scheme: dark").contains("width=device-width");
         }
@@ -54,7 +56,7 @@ class AdminNavTest extends IntegrationTest {
 
     @Test
     void theNewPagesAreForThisMachineOnlyWithoutAPassword() throws Exception {
-        for (String page : new String[] {"/admin/corrections", "/admin/costs"}) {
+        for (String page : new String[] {"/admin/corrections", "/admin/costs", "/admin/channels", "/admin/insights"}) {
             mvc.perform(from("203.0.113.9", get(page))).andExpect(status().isForbidden());
             mvc.perform(get(page).header("X-Forwarded-For", "203.0.113.9")).andExpect(status().isForbidden());
         }

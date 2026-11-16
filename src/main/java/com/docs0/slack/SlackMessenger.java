@@ -62,6 +62,12 @@ public interface SlackMessenger {
     /** Who a user is. */
     SlackUser userInfo(String userId);
 
+    /** The Slack user with this email, or empty when there is none (or the workspace hides emails from the app). */
+    java.util.Optional<String> lookupByEmail(String email);
+
+    /** Opens (or finds) the direct message with a user and returns its channel id. Needs the im:write scope. */
+    String openDm(String userId);
+
     /** The scopes granted to the bot token, or an empty set when Slack did not say. */
     Set<String> botScopes();
 

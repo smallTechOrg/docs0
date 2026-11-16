@@ -48,6 +48,7 @@ public class CostsController {
     public String page(Model model) {
         long tenantId = tenants.current().id();
         BigDecimal spent = budget.spentThisMonth(tenantId);
+        BigDecimal other = budget.otherSpentThisMonth(tenantId);
         BigDecimal cap = budget.monthlyCap();
         int percent = cap == null ? 0
                 : spent.multiply(BigDecimal.valueOf(100)).divide(cap, 0, java.math.RoundingMode.DOWN)
@@ -72,6 +73,9 @@ public class CostsController {
 
         model.addAttribute("tenantName", tenants.current().name());
         model.addAttribute("spent", spent);
+        model.addAttribute("otherSpent", other);
+        model.addAttribute("questionSpent", spent.subtract(other));
+        model.addAttribute("otherSpent30", report.otherSpend(tenantId, DAYS));
         model.addAttribute("cap", cap);
         model.addAttribute("percent", percent);
         model.addAttribute("days", days);
