@@ -22,11 +22,14 @@ root.
   3. *Slack + conversation log* — `slack/`, `conversation/`, migration for
      `conversation`, `interaction`, `slack/manifest.yml`. Capability C1.
   4. *Status page* — `web/`. Capability C4.
+  5. *Connect Google Drive* — `web/admin/`, `crypto/`, changes in `source/drive/`,
+     migration V2. Replaces the service account. Capability C2.
 - **Gate.** `./mvnw -q verify` (unit and Postgres integration tests for every slice),
   plus a live check with real keys: one sync run against the real Drive prints a
   non-zero document count, and one real question through `AgentService` returns an
   answer with at least one verified citation.
-- **User test.** In Slack: @docs0 with a question whose answer is in a Drive doc; check
+- **User test.** On the Sources page: connect Google Drive, pick a folder, sync now.
+  In Slack: @docs0 with a question whose answer is in a Drive doc; check
   the link and quote; ask a follow-up in the thread without @; DM it; ask something
   that is not in any doc.
 - **Deferred.** Everything in Phases 2–7. The status page is read-only and unprotected
@@ -35,12 +38,11 @@ root.
 ## Phase 2 — Feedback, corrections, admin dashboard
 
 - **Goal.** 👎/👍, reply-to-correct, admin review queue, corrections applied and cited,
-  cost totals, and connecting Google Drive from the dashboard (sign in with Google, pick
-  folders, check access, sync now). Capabilities C5, C6.
+  cost totals. Capabilities C5, C6.
 - **Gate.** `./mvnw -q verify`; live: a correction approved on the dashboard changes the
   answer to the same question and is cited.
 - **User test.** 👎 an answer, correct it in thread, approve it on the dashboard, ask
-  again. Connect a Drive folder from the dashboard and see its documents appear.
+  again.
 
 ## Phase 3 — Linear and Trello
 

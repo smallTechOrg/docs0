@@ -25,13 +25,14 @@ with links and quoted snippets, and it learns from the team's corrections.
 | Cost | Hidden from the team. Totals on the admin dashboard. Hard cap of $100 per month; docs0 stops answering when it is reached. Model: Claude Sonnet 5.5. |
 | Audit | Admin sees corrections and answers people were unhappy with. |
 | Scale | Under ~5k Drive files. Content fresh within the hour. |
-| Stack | Java backend (binding). Anthropic is the only AI provider. Slack Socket Mode. Google service account. |
+| Stack | Java backend (binding). Anthropic is the only AI provider. Slack Socket Mode. Drive is connected by an admin signing in with Google on the dashboard (no service account). |
 
 ## Assumptions
 
 - Assumed: Grain notes are shared team knowledge, like Drive.
-- Assumed: Drive starts with folders shared to the service account; domain-wide delegation
-  is set up in the Gmail phase.
+- Drive is connected by an admin's Google sign-in and a folder selection (user decision,
+  replacing the earlier service-account plan). Domain-wide delegation is set up in the
+  Gmail phase.
 - Assumed: "answer repeat questions" re-derives the answer from sources and approved
   corrections; it does not replay an old answer.
 - Assumed: tenant isolation is built in from the first migration even though only one

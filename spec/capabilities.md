@@ -31,18 +31,40 @@ Each capability lists its behaviour and the phase that delivers it (see `roadmap
 
 ## C2. Google Drive knowledge (Phase 1)
 
-- **Scope.** Every file the service account can see, or only the folders listed in
-  `DOCS0_DRIVE_FOLDER_IDS` (recursively). Shared drives are included.
+There is no service account. An admin connects Drive from the dashboard.
+
+- **Connect with Google.** On the Sources page the admin clicks *Connect Google Drive*,
+  signs in with Google and grants read-only Drive access. docs0 stores the resulting
+  refresh token encrypted, per tenant, and shows which Google account is connected.
+- **Choose what to index.** After connecting, the admin browses their Drive on the
+  Sources page — My Drive folders, folders shared with them, and shared drives — opens
+  folders to go deeper, and ticks the folders to index. Everything inside a chosen
+  folder is included, recursively. Nothing is indexed until at least one folder is
+  chosen. The selection can be changed at any time.
+- **Check access.** For the current selection the page shows each folder's name and how
+  many indexable files docs0 found in it, without waiting for a sync.
+- **Sync now.** A button starts a sync immediately; the page shows it running and then
+  the result. Syncs also run at startup and every 15 minutes.
+- **Disconnect.** Removes the stored grant and marks the source's documents deleted so
+  they drop out of answers.
 - **Types.** Google Docs, Sheets and Slides (exported to text / CSV), PDFs, and plain
   text / Markdown / CSV files. Other types are counted as skipped. Files over 20 MB and
   trashed files are skipped. Folders are traversed, not indexed.
-- **Sync.** A full sync at startup, then every 15 minutes. Unchanged files (same
-  modified time) are not re-downloaded. Files no longer visible are marked deleted and
-  drop out of search. One failed file never aborts a run.
+- **Sync behaviour.** Unchanged files (same modified time) are not re-downloaded. Files
+  no longer inside a chosen folder are marked deleted and drop out of search. One failed
+  file never aborts a run. If Google rejects the stored grant (revoked or expired), the
+  run fails with a clear "reconnect Google Drive" message and nothing is deleted.
 - **Sync log.** Each run records counts (added, updated, removed, skipped, failed) and
-  any error. The latest run is shown on the status page.
+  any error. Recent runs are listed on the Sources page.
 - **Stored per document.** Title, type, link, owner name and email, modified time, full
   extracted text.
+- **Setup needed once per deployment.** A Google OAuth client (`DOCS0_GOOGLE_OAUTH_CLIENT_ID`,
+  `DOCS0_GOOGLE_OAUTH_CLIENT_SECRET`) with redirect URI
+  `<DOCS0_PUBLIC_URL>/admin/sources/google/callback`, and `DOCS0_ENCRYPTION_KEY`. When
+  any is missing the Sources page explains what to set instead of showing the button.
+- **Admin access.** Pages under `/admin` require HTTP Basic auth with
+  `DOCS0_ADMIN_PASSWORD` (user `admin`). When no password is set they are served only
+  to requests from the local machine.
 
 ## C3. Cited answering (Phase 1)
 
@@ -51,7 +73,7 @@ clarifying questions, honest "I don't know", suggested people, conflict handling
 
 ## C4. Status page (Phase 1)
 
-`/` shows: Slack, Anthropic and Drive connection state with the reason when one is off;
+`/` shows: a link to the Sources page; Slack, Anthropic and Drive connection state with the reason when one is off;
 document count; last sync run; number of questions answered. `/health` returns JSON
 `{"status":"UP", ...}` with the same component states. No secrets are shown.
 
@@ -70,21 +92,8 @@ document count; last sync run; number of questions answered. `/health` returns J
 Protected by an admin password. Pages: sources and sync log; unhappy answers and
 corrections queue; cost totals per day and month; (later) insights.
 
-**Connect Google Drive from the dashboard.** An admin sets up company docs without
-touching Google Cloud or a terminal:
-
-- *Connect with Google.* The admin signs in with Google on the dashboard and picks the
-  folders and shared drives to index from a folder picker. docs0 stores the grant for
-  the tenant (encrypted) and indexes exactly what was picked. This is the default path
-  and the one other tenants will use.
-- *Service account (alternative).* The page shows the service account's email with a
-  copy button and the steps to share a folder with it as Viewer.
-- *Check access.* A button lists what docs0 can currently see (folders, file count) so
-  the admin knows the share worked before waiting for a sync.
-- *Sync now.* A button starts a sync immediately; progress and the result show on the
-  page.
-- Folders can be added or removed later; removing one drops its documents from answers
-  at the next sync.
+Connecting Google Drive from the dashboard is delivered in Phase 1 (C2). Later sources get
+the same connect, check access and sync-now treatment.
 
 ## C7. Linear and Trello (Phase 3)
 
