@@ -37,12 +37,15 @@
 <main>
   <h1>docs0</h1>
   <p class="sub">Knowledge agent for <span th:text="${s.tenantName}">tenant</span> ·
-    <a href="/admin/sources">Sources</a> — connect Google Drive and choose folders</p>
+    <a href="/admin/sources">Sources</a> · <a href="/admin/corrections">Corrections</a> ·
+    <a href="/admin/costs">Costs</a></p>
 
   <h2>At a glance</h2>
   <div class="stats">
     <div class="card stat"><b th:text="${s.documents}">0</b><span>documents indexed</span></div>
     <div class="card stat"><b th:text="${s.questions}">0</b><span>questions answered</span></div>
+    <div class="card stat"><a href="/admin/corrections" style="text-decoration:none">
+      <b th:text="${s.pendingCorrections}">0</b><span>pending corrections</span></a></div>
     <div class="card stat">
       <b>$<span th:text="${#numbers.formatDecimal(s.spentThisMonth, 1, 2)}">0.00</span></b>
       <span th:if="${s.monthlyCap != null}">spent this month of $<span th:text="${#numbers.formatDecimal(s.monthlyCap, 1, 0)}">100</span> cap</span>

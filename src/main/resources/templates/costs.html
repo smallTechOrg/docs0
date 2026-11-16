@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <title>docs0 costs</title>
+  <th:block th:replace="~{admin/fragments :: styles}"></th:block>
+</head>
+<body>
+<main>
+  <nav th:replace="~{admin/fragments :: nav('costs')}"></nav>
+  <h1>Costs</h1>
+  <p class="sub">What <span th:text="${tenantName}">tenant</span>'s questions cost. Days are UTC.</p>
+
+  <h2>This month</h2>
+  <div class="card pad" id="month">
+    <div class="big">$<span th:text="${#numbers.formatDecimal(spent, 1, 'COMMA', 2, 'POINT')}">0.00</span></div>
+    <th:block th:if="${cap != null}">
+      <div class="bar" th:classappend="${percent >= 100} ? 'over'"><div th:style="${'width:' + percent + '%'}"></div></div>
+      <span class="sub"><span th:text="${percent}">0</span>% of the $<span
+        th:text="${#numbers.formatDecimal(cap, 1, 'COMMA', 2, 'POINT')}">100.00</span> monthly cap.
+        <span th:if="${percent >= 100}" class="DOWN">The cap is used up, so docs0 is not answering new questions.</span></span>
+    </th:block>
+    <span class="sub" th:if="${cap == null}">No monthly cap is set.</span>
+  </div>
+
+  <h2>Last <span th:text="${dayCount}">30</span> days</h2>
+  <div class="card scroll" id="days">
+    <div class="empty" th:if="${days.isEmpty()}">No questions in the last <span th:text="${dayCount}">30</span> days.</div>
+    <table th:if="${!days.isEmpty()}">
+      <thead><tr><th>Day</th><th>Questions</th><th>Tokens in</th><th>Tokens out</th><th>Cost</th></tr></thead>
+      <tbody>
+        <tr th:each="d : ${days}">
+          <td th:text="${d.day}">Mon 17 Nov</td>
+          <td th:text="${d.questions}">0</td>
+          <td th:text="${#numbers.formatInteger(d.inputTokens, 1, 'COMMA')}">0</td>
+          <td th:text="${#numbers.formatInteger(d.outputTokens, 1, 'COMMA')}">0</td>
+          <td>$<span th:text="${#numbers.formatDecimal(d.costUsd, 1, 'COMMA', 4, 'POINT')}">0.0000</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h2>Most expensive questions this month</h2>
+  <div class="card" id="top">
+    <div class="empty" th:if="${top.isEmpty()}">No questions have cost anything this month.</div>
+    <div class="row" th:each="t : ${top}">
+      <div class="name" th:if="${t.dm}"><i>DM question</i></div>
+      <div class="name" th:if="${!t.dm}" th:text="${t.question}">question</div>
+      <div class="detail" th:text="${t.when}">time</div>
+      <div class="state">$<span th:text="${#numbers.formatDecimal(t.costUsd, 1, 'COMMA', 4, 'POINT')}">0.0000</span></div>
+    </div>
+  </div>
+</main>
+</body>
+</html>

@@ -62,6 +62,11 @@ final class ScriptedLlm implements LlmClient {
     }
 
     @Override
+    public LlmTurn oneShot(String systemPrompt, String userText, ToolSpec tool) {
+        throw new AssertionError("the agent never makes one-shot calls");
+    }
+
+    @Override
     public LlmSession start(String systemPrompt, List<ToolSpec> tools) {
         sessions++;
         this.systemPrompt = systemPrompt;

@@ -39,7 +39,7 @@ class SlackGatewayTest {
     @Test
     void reportsOffAndStaysIdleWithoutTokens() {
         Docs0Properties props = props("", "");
-        SlackGateway gateway = new SlackGateway(props, new BoltSlackMessenger(props), null);
+        SlackGateway gateway = new SlackGateway(props, new BoltSlackMessenger(props), null, null);
 
         gateway.start();
 
@@ -51,7 +51,7 @@ class SlackGatewayTest {
     @Test
     void reportsDownUntilConnectedWhenTokensAreSet() {
         Docs0Properties props = props("xoxb-test", "xapp-test");
-        SlackGateway gateway = new SlackGateway(props, new BoltSlackMessenger(props), null);
+        SlackGateway gateway = new SlackGateway(props, new BoltSlackMessenger(props), null, null);
 
         // Not started: status() itself never calls Slack.
         assertThat(gateway.status().name()).isEqualTo("Slack");
@@ -66,9 +66,12 @@ class SlackGatewayTest {
             context.registerBean(Docs0Properties.class, () -> props("", ""));
             context.registerBean(SlackFakes.FakeAgent.class);
             context.registerBean(SlackFakes.FakeKnowledge.class);
+            context.registerBean(SlackFakes.FakeLlm.class);
             context.register(com.docs0.tenant.TenantService.class, com.docs0.budget.BudgetService.class,
                     com.docs0.conversation.ConversationRepository.class,
                     com.docs0.conversation.InteractionRepository.class,
+                    com.docs0.feedback.FeedbackRepository.class, com.docs0.feedback.CorrectionRepository.class,
+                    CorrectionDetector.class, CorrectionFlow.class, ReactionHandler.class,
                     BoltSlackMessenger.class, QuestionHandler.class, SlackGateway.class);
             context.refresh();
 
@@ -184,7 +187,7 @@ class SlackGatewayTest {
                 "channels:history", "groups:history", "im:history", "mpim:history", "channels:read", "groups:read",
                 "im:read", "mpim:read", "users:read", "reactions:read");
         assertThat((List<String>) events.get("bot_events")).containsExactlyInAnyOrder("app_mention",
-                "message.channels", "message.groups", "message.im", "message.mpim", "reaction_added");
+                "message.channels", "message.groups", "message.im", "message.mpim", "reaction_added", "reaction_removed");
         assertThat(settings).containsEntry("socket_mode_enabled", true);
         assertThat(interactivity).containsEntry("is_enabled", true);
     }

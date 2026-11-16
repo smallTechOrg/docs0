@@ -39,9 +39,15 @@ final class SlackFakes {
         volatile boolean memberLookupFails;
         volatile boolean rejectBlocks;
         volatile boolean rejectAllUpdates;
+        volatile boolean postsFail;
+        final java.util.Map<String, String> names = new java.util.concurrent.ConcurrentHashMap<>();
+        volatile boolean nameLookupFails;
 
         @Override
         public String postMessage(String channel, String threadTs, String text, List<LayoutBlock> blocks) {
+            if (postsFail) {
+                throw new SlackCallException("chat.postMessage", "channel_not_found", null);
+            }
             String ts = "9000.%04d".formatted(nextTs.incrementAndGet());
             posts.add(new Posted(channel, threadTs, text, blocks, ts));
             return ts;
@@ -62,6 +68,14 @@ final class SlackFakes {
                 throw new SlackCallException("conversations.members", "missing_scope", null);
             }
             return members;
+        }
+
+        @Override
+        public String userDisplayName(String userId) {
+            if (nameLookupFails) {
+                throw new SlackCallException("users.info", "missing_scope", null);
+            }
+            return names.get(userId);
         }
 
         @Override
@@ -98,6 +112,31 @@ final class SlackFakes {
         public AgentResult answer(AgentRequest request, ProgressListener progress) {
             requests.add(request);
             return behaviour.apply(request, progress);
+        }
+    }
+
+    /** A fake model for the one-shot classification: answers with {@link #verdict} and records what it was asked. */
+    static final class FakeLlm implements com.docs0.agent.LlmClient {
+
+        final List<String> asked = new CopyOnWriteArrayList<>();
+        volatile String kind = "correction";
+        volatile String fact = "";
+        volatile boolean fails;
+
+        @Override
+        public LlmTurn oneShot(String systemPrompt, String userText, ToolSpec tool) {
+            asked.add(userText);
+            if (fails) {
+                throw new LlmException("overloaded_error", "busy", null);
+            }
+            return new LlmTurn(StopReason.TOOL_USE, "",
+                    List.of(new ToolCall("toolu_1", tool.name(), java.util.Map.of("kind", kind, "fact", fact))),
+                    300, 20, "tool_use");
+        }
+
+        @Override
+        public LlmSession start(String systemPrompt, List<ToolSpec> tools) {
+            throw new UnsupportedOperationException();
         }
     }
 

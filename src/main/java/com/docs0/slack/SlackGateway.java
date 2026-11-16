@@ -15,6 +15,7 @@ import com.slack.api.model.event.MessageEvent;
 import com.slack.api.model.event.MessageFileShareEvent;
 import com.slack.api.model.event.MessageThreadBroadcastEvent;
 import com.slack.api.model.event.ReactionAddedEvent;
+import com.slack.api.model.event.ReactionRemovedEvent;
 import com.slack.api.socket_mode.SocketModeClient;
 import jakarta.annotation.PreDestroy;
 import java.util.regex.Pattern;
@@ -42,16 +43,19 @@ public class SlackGateway implements StatusContributor {
     private final Docs0Properties props;
     private final BoltSlackMessenger messenger;
     private final QuestionHandler handler;
+    private final ReactionHandler reactions;
 
     private volatile ComponentStatus status;
     private volatile SocketModeApp socketModeApp;
     private volatile Thread connector;
     private volatile boolean stopped;
 
-    public SlackGateway(Docs0Properties props, BoltSlackMessenger messenger, QuestionHandler handler) {
+    public SlackGateway(Docs0Properties props, BoltSlackMessenger messenger, QuestionHandler handler,
+            ReactionHandler reactions) {
         this.props = props;
         this.messenger = messenger;
         this.handler = handler;
+        this.reactions = reactions;
         this.status = configured()
                 ? ComponentStatus.down(NAME, "not connected yet")
                 : ComponentStatus.off(NAME, "no Slack tokens configured");
@@ -153,8 +157,15 @@ public class SlackGateway implements StatusContributor {
         app.event(MessageChannelJoinEvent.class, (payload, ctx) -> ctx.ack());
         app.event(MessageFileShareEvent.class, (payload, ctx) -> ctx.ack());
         app.event(MessageThreadBroadcastEvent.class, (payload, ctx) -> ctx.ack());
-        // Subscribed for feedback in a later phase.
-        app.event(ReactionAddedEvent.class, (payload, ctx) -> ctx.ack());
+        // Thumbs up and down on answers are feedback.
+        app.event(ReactionAddedEvent.class, (payload, ctx) -> {
+            dispatch(() -> reactions.handle(fromReactionAdded(payload.getEvent())));
+            return ctx.ack();
+        });
+        app.event(ReactionRemovedEvent.class, (payload, ctx) -> {
+            dispatch(() -> reactions.handle(fromReactionRemoved(payload.getEvent())));
+            return ctx.ack();
+        });
     }
 
     /** Hands an event to the handler without ever failing the acknowledgement. */
@@ -213,6 +224,22 @@ public class SlackGateway implements StatusContributor {
         }
         return new IncomingEvent(kind, e.getChannel(), e.getUser(), e.getText(), e.getTs(), e.getThreadTs(), eventId,
                 null, e.getBotId() != null);
+    }
+
+    /** A reaction added to a message. Null when it was not added to a message. */
+    static ReactionEvent fromReactionAdded(ReactionAddedEvent e) {
+        if (e == null || e.getItem() == null || !"message".equals(e.getItem().getType())) {
+            return null;
+        }
+        return new ReactionEvent(true, e.getItem().getChannel(), e.getUser(), e.getReaction(), e.getItem().getTs());
+    }
+
+    /** A reaction removed from a message. Null when it was not removed from a message. */
+    static ReactionEvent fromReactionRemoved(ReactionRemovedEvent e) {
+        if (e == null || e.getItem() == null || !"message".equals(e.getItem().getType())) {
+            return null;
+        }
+        return new ReactionEvent(false, e.getItem().getChannel(), e.getUser(), e.getReaction(), e.getItem().getTs());
     }
 
     /** Where a follow-up is asked: the clicked message's thread; in a channel never outside a thread. */

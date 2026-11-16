@@ -78,6 +78,22 @@ public class BoltSlackMessenger implements SlackMessenger {
     }
 
     @Override
+    public String userDisplayName(String userId) {
+        var user = call("users.info", () -> client.usersInfo(r -> r.user(userId))).getUser();
+        if (user == null) {
+            return userId;
+        }
+        var profile = user.getProfile();
+        for (String name : new String[] {profile == null ? null : profile.getDisplayName(),
+                user.getRealName(), profile == null ? null : profile.getRealName(), user.getName()}) {
+            if (name != null && !name.isBlank()) {
+                return name.strip();
+            }
+        }
+        return userId;
+    }
+
+    @Override
     public String botUserId() {
         String id = botUserId;
         return id != null ? id : identify().botUserId();

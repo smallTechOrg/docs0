@@ -20,6 +20,9 @@ public interface SlackMessenger {
     /** User ids of every member of a channel. */
     Set<String> channelMembers(String channel);
 
+    /** The name people see for a user: display name, else real name, else the user name. */
+    String userDisplayName(String userId);
+
     /** docs0's own Slack user id. */
     String botUserId();
 

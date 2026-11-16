@@ -31,6 +31,15 @@ public record Docs0Properties(
         public boolean configured() {
             return hasText(apiKey);
         }
+
+        /** Cost in USD of this many input and output tokens at the configured per-million prices. */
+        public BigDecimal cost(long inputTokens, long outputTokens) {
+            BigDecimal in = inputPricePerMtok == null ? BigDecimal.ZERO : inputPricePerMtok;
+            BigDecimal out = outputPricePerMtok == null ? BigDecimal.ZERO : outputPricePerMtok;
+            return BigDecimal.valueOf(inputTokens).multiply(in)
+                    .add(BigDecimal.valueOf(outputTokens).multiply(out))
+                    .divide(BigDecimal.valueOf(1_000_000), 6, java.math.RoundingMode.HALF_UP);
+        }
     }
 
     public record Budget(BigDecimal monthlyUsd) {

@@ -12,6 +12,13 @@ public interface LlmClient {
     /** Starts one conversation with a fixed system prompt and tool set. Makes no network call. */
     LlmSession start(String systemPrompt, List<ToolSpec> tools);
 
+    /**
+     * One small model call outside any conversation: a system prompt, one user message and one
+     * tool the model is asked to call. Cheap settings (low effort, short output). Throws
+     * {@link LlmException} when the call fails.
+     */
+    LlmTurn oneShot(String systemPrompt, String userText, ToolSpec tool);
+
     /** One conversation. The session keeps the message history; each call is one model turn. */
     interface LlmSession {
 

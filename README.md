@@ -40,6 +40,9 @@ cost of the month's answers reaches it.
    `connections:write` scope. Copy it (`xapp-…`) into `DOCS0_SLACK_APP_TOKEN`.
 4. Invite the bot to the channels where the team will use it: `/invite @docs0`.
 
+If you created the app before feedback existed, paste the manifest again (*App Manifest*
+in the app settings) so the app also subscribes to `reaction_removed`.
+
 docs0 connects out to Slack over Socket Mode, so it needs no public URL.
 
 ### 3. Google Drive
@@ -94,6 +97,16 @@ what is not set up.
 - Mention it in a channel: `@docs0 what is our refund policy?` It answers in a thread.
 - Reply in that thread to ask a follow-up. No mention needed.
 - Send it a direct message for a private conversation.
+- React 👍 or 👎 to an answer. On 👎 docs0 asks what was wrong; reply in the thread with
+  the right answer (or just reply "that's wrong, it's actually…" at any time) and it goes
+  to the admins as a pending correction. It changes nothing until an admin approves it.
+- Admins review corrections on the **Corrections** page (`/admin/corrections`): approve
+  (optionally after editing the wording), reject, or un-approve later. The same page lists
+  answers that got a 👎. The **Costs** page (`/admin/costs`) shows spend per day and the
+  most expensive questions.
+- Approved corrections outrank documents. When one shapes an answer, docs0 says so, for
+  example "per Arjun's correction on 2 Nov". A correction made in a DM is credited to
+  "a teammate", never by name.
 
 Each answer lists its sources with the exact passage it relied on. When docs0 is unsure
 it says so, asks a clarifying question, or names who might know.

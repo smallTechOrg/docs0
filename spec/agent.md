@@ -101,8 +101,9 @@ of the whole DM.
 
 ## Later phases (same loop, more tools and context)
 
-- Approved corrections are retrieved by keyword match on the question and injected as a
-  system message with author and date; the model must prefer and cite them.
+- Approved corrections are retrieved by keyword match on the question and injected in the
+  first user message (the system prompt stays constant) with author and date; the model
+  must prefer them and say when one shaped the answer. Delivered in Phase 2.
 - More source kinds appear as more values behind `search_knowledge`, not more tools.
 - `create_linear_issue` and `create_trello_card` are dedicated tools gated by an explicit
   user request in the thread.

@@ -34,6 +34,7 @@ import org.springframework.stereotype.Component;
 public class AnthropicLlmClient implements LlmClient {
 
     static final long MAX_TOKENS = 16000L;
+    static final long ONE_SHOT_MAX_TOKENS = 1000L;
 
     private final Docs0Properties.Anthropic settings;
     private AnthropicClient client;
@@ -46,6 +47,34 @@ public class AnthropicLlmClient implements LlmClient {
     public LlmSession start(String systemPrompt, List<ToolSpec> tools) {
         List<Tool> sdkTools = tools.stream().map(AnthropicLlmClient::toTool).toList();
         return new Session(client(), settings.model(), systemPrompt, sdkTools);
+    }
+
+    @Override
+    public LlmTurn oneShot(String systemPrompt, String userText, ToolSpec tool) {
+        MessageCreateParams.Builder params = MessageCreateParams.builder()
+                .model(settings.model())
+                .maxTokens(ONE_SHOT_MAX_TOKENS)
+                .outputConfig(OutputConfig.builder().effort(OutputConfig.Effort.LOW).build())
+                .system(systemPrompt)
+                .addUserMessage(userText)
+                .addTool(toTool(tool));
+        Message response;
+        try {
+            response = client().messages().create(params.build());
+        } catch (AnthropicServiceException e) {
+            throw new LlmException(serviceFailure(e), e.apiMessage().orElse(e.getMessage()), e);
+        } catch (AnthropicIoException e) {
+            throw new LlmException(e.getClass().getSimpleName() + " (network)", e.getMessage(), e);
+        } catch (AnthropicException e) {
+            throw new LlmException(e.getClass().getSimpleName(), e.getMessage(), e);
+        }
+        return toTurn(response);
+    }
+
+    private static String serviceFailure(AnthropicServiceException e) {
+        return e.getClass().getSimpleName() + " ("
+                + e.errorType().map(t -> t.asString() + ", ").orElse("")
+                + "HTTP " + e.statusCode() + ")";
     }
 
     /** Built on first use so the app starts without a key. */
@@ -175,10 +204,7 @@ public class AnthropicLlmClient implements LlmClient {
             try {
                 response = client.messages().create(buildParams(model, systemPrompt, tools, messages));
             } catch (AnthropicServiceException e) {
-                String type = e.getClass().getSimpleName() + " ("
-                        + e.errorType().map(t -> t.asString() + ", ").orElse("")
-                        + "HTTP " + e.statusCode() + ")";
-                throw new LlmException(type, e.apiMessage().orElse(e.getMessage()), e);
+                throw new LlmException(serviceFailure(e), e.apiMessage().orElse(e.getMessage()), e);
             } catch (AnthropicIoException e) {
                 throw new LlmException(e.getClass().getSimpleName() + " (network)", e.getMessage(), e);
             } catch (AnthropicException e) {

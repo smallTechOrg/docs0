@@ -90,7 +90,19 @@ src/test/java/com/docs0/        mirrors main
   confidence, citations jsonb, steps, input_tokens, output_tokens, cost_usd, duration_ms,
   error, created_at)`
 
-Later phases add `correction`, `feedback`, `principal`/ACL tables and channel settings.
+Phase 2 adds:
+
+- `feedback(id, tenant_id, interaction_id, slack_user_id, rating UP|DOWN, created_at)` —
+  unique on `(interaction_id, slack_user_id)`.
+- `correction(id, tenant_id, interaction_id, author_slack_id, author_name, question,
+  original_answer, correction_text, edited_text, status PENDING|APPROVED|REJECTED, from_dm,
+  created_at, reviewed_at, search tsvector)` — `search` covers the question and the edited
+  (else extracted) text, GIN indexed.
+- `feedback_prompt(id, tenant_id, conversation_id, interaction_id UNIQUE, created_at,
+  cleared_at)` — a thread waiting for a correction.
+- `interaction.correction_ids jsonb` — approved corrections shown to the model for that answer.
+
+Later phases add `principal`/ACL tables and channel settings.
 
 ## Access model (design, enforced from Phase 4)
 

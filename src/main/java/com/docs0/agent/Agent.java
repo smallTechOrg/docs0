@@ -40,7 +40,18 @@ public interface Agent {
             long outputTokens,
             BigDecimal costUsd,
             long durationMs,
-            String error) {}
+            String error,
+            /** Ids of the approved corrections that were put in front of the model for this answer. */
+            List<Long> correctionIds) {
+
+        /** A result that used no corrections. */
+        public AgentResult(Kind kind, String answer, Confidence confidence, List<Citation> citations,
+                List<String> followUps, List<String> suggestedPeople, int steps, long inputTokens,
+                long outputTokens, BigDecimal costUsd, long durationMs, String error) {
+            this(kind, answer, confidence, citations, followUps, suggestedPeople, steps, inputTokens, outputTokens,
+                    costUsd, durationMs, error, List.of());
+        }
+    }
 
     /** Receives short human-readable progress lines, e.g. "Searching for pricing 2026…". */
     @FunctionalInterface

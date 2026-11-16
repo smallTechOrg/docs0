@@ -21,7 +21,7 @@ public class StatusService {
                            int added, int updated, int removed, int skipped, int failed, String error) {}
 
     public record Snapshot(String tenantName, List<ComponentStatus> components, long documents,
-                           long questions, BigDecimal spentThisMonth, BigDecimal monthlyCap,
+                           long questions, long pendingCorrections, BigDecimal spentThisMonth, BigDecimal monthlyCap,
                            Optional<LastSync> lastSync) {}
 
     private final JdbcClient jdbc;
@@ -54,6 +54,9 @@ public class StatusService {
                 .param("t", tenant.id()).query(Long.class).single();
         long questions = jdbc.sql("SELECT count(*) FROM interaction WHERE tenant_id = :t")
                 .param("t", tenant.id()).query(Long.class).single();
+        long pendingCorrections = jdbc.sql(
+                        "SELECT count(*) FROM correction WHERE tenant_id = :t AND status = 'PENDING'")
+                .param("t", tenant.id()).query(Long.class).single();
         Optional<LastSync> lastSync = jdbc.sql("""
                         SELECT s.name, r.status, r.started_at, r.finished_at, r.added, r.updated, r.removed,
                                r.skipped, r.failed, r.error
@@ -69,6 +72,6 @@ public class StatusService {
                 .optional();
 
         return new Snapshot(tenant.name(), components, documents, questions,
-                budget.spentThisMonth(tenant.id()), budget.monthlyCap(), lastSync);
+                pendingCorrections, budget.spentThisMonth(tenant.id()), budget.monthlyCap(), lastSync);
     }
 }

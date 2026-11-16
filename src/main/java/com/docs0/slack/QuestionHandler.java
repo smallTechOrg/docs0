@@ -68,6 +68,7 @@ public class QuestionHandler {
     private final ConversationRepository conversations;
     private final InteractionRepository interactions;
     private final SlackMessenger messenger;
+    private final CorrectionFlow corrections;
     private final long statusIntervalMillis;
 
     private final ExecutorService workers = Executors.newVirtualThreadPerTaskExecutor();
@@ -86,14 +87,15 @@ public class QuestionHandler {
 
     @Autowired
     public QuestionHandler(TenantService tenants, Agent agent, KnowledgeSearch knowledge, BudgetService budget,
-            ConversationRepository conversations, InteractionRepository interactions, SlackMessenger messenger) {
-        this(tenants, agent, knowledge, budget, conversations, interactions, messenger, STATUS_INTERVAL);
+            ConversationRepository conversations, InteractionRepository interactions, SlackMessenger messenger,
+            CorrectionFlow corrections) {
+        this(tenants, agent, knowledge, budget, conversations, interactions, messenger, corrections, STATUS_INTERVAL);
     }
 
     /** For tests: {@code statusInterval} is the minimum time between two status line updates. */
     QuestionHandler(TenantService tenants, Agent agent, KnowledgeSearch knowledge, BudgetService budget,
             ConversationRepository conversations, InteractionRepository interactions, SlackMessenger messenger,
-            Duration statusInterval) {
+            CorrectionFlow corrections, Duration statusInterval) {
         this.tenants = tenants;
         this.agent = agent;
         this.knowledge = knowledge;
@@ -101,6 +103,7 @@ public class QuestionHandler {
         this.conversations = conversations;
         this.interactions = interactions;
         this.messenger = messenger;
+        this.corrections = corrections;
         this.statusIntervalMillis = statusInterval.toMillis();
     }
 
@@ -149,6 +152,11 @@ public class QuestionHandler {
                 return;
             }
             String text = stripMention(event.text(), botUserId, event.kind() == IncomingEvent.Kind.MENTION);
+            // A reply that corrects an answer goes to the admins; anything else is a question.
+            if ((threadReply || dm) && !text.isEmpty() && corrections.handle(tenantId, event.channel(),
+                    replyThreadTs, conversationThreadTs, dm, event.user(), text)) {
+                return;
+            }
             answer(tenantId, new Question(event.channel(), replyThreadTs, conversationThreadTs, dm, event.user(), text));
         });
     }
@@ -299,7 +307,7 @@ public class QuestionHandler {
                 result = new AgentResult(Kind.ERROR, result.answer(), result.confidence(), result.citations(),
                         result.followUps(), result.suggestedPeople(), result.steps(), result.inputTokens(),
                         result.outputTokens(), result.costUsd(), result.durationMs(),
-                        "could not show the answer in Slack: " + reason(e));
+                        "could not show the answer in Slack: " + reason(e), result.correctionIds());
             }
         }
         try {

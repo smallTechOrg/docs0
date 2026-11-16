@@ -2,6 +2,7 @@ package com.docs0.conversation;
 
 import com.docs0.agent.Agent.Exchange;
 import java.util.List;
+import java.util.Optional;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
@@ -37,6 +38,20 @@ public class ConversationRepository {
                 .query((rs, n) -> new Conversation(rs.getLong("id"), rs.getLong("tenant_id"),
                         rs.getString("channel_id"), rs.getString("thread_ts"), rs.getBoolean("is_dm")))
                 .single();
+    }
+
+    /** The conversation of this channel and thread, if there is one. */
+    public Optional<Conversation> find(long tenantId, String channelId, String threadTs) {
+        return jdbc.sql("""
+                        SELECT id, tenant_id, channel_id, thread_ts, is_dm FROM conversation
+                        WHERE tenant_id = :tenantId AND channel_id = :channelId AND thread_ts = :threadTs
+                        """)
+                .param("tenantId", tenantId)
+                .param("channelId", channelId)
+                .param("threadTs", threadTs == null ? "" : threadTs)
+                .query((rs, n) -> new Conversation(rs.getLong("id"), rs.getLong("tenant_id"),
+                        rs.getString("channel_id"), rs.getString("thread_ts"), rs.getBoolean("is_dm")))
+                .optional();
     }
 
     /** True when docs0 has already replied to at least one question in this channel and thread. */

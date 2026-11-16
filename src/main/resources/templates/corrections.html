@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <title>docs0 corrections</title>
+  <th:block th:replace="~{admin/fragments :: styles}"></th:block>
+</head>
+<body>
+<main>
+  <nav th:replace="~{admin/fragments :: nav('corrections')}"></nav>
+  <h1>Corrections</h1>
+  <p class="sub">What people said docs0 got wrong in <span th:text="${tenantName}">tenant</span>. Only approved
+    corrections change its answers.</p>
+
+  <div class="card msg notice" th:if="${notice != null}" th:text="${notice}">notice</div>
+
+  <div class="tabs">
+    <a href="/admin/corrections?tab=pending" th:classappend="${tab == 'pending'} ? 'on'">
+      Pending (<span th:text="${pending.size()}">0</span>)</a>
+    <a href="/admin/corrections?tab=unhappy" th:classappend="${tab == 'unhappy'} ? 'on'">
+      Unhappy answers (<span th:text="${unhappy.size()}">0</span>)</a>
+    <a href="/admin/corrections?tab=reviewed" th:classappend="${tab == 'reviewed'} ? 'on'">
+      Reviewed (<span th:text="${reviewed.size()}">0</span>)</a>
+  </div>
+
+  <!-- Pending -->
+  <th:block th:if="${tab == 'pending'}">
+    <h2>Pending</h2>
+    <div class="card" id="pending">
+      <div class="empty" th:if="${pending.isEmpty()}">Nothing to review. When someone replies to correct an answer,
+        it shows up here.</div>
+      <div class="item" th:each="p : ${pending}">
+        <p><b th:text="${p.author}">Arjun</b>
+          <span class="badge" th:if="${p.dm}">DM</span>
+          <span class="sub">said, on <span th:text="${p.when}">time</span>:</span></p>
+        <p><span class="label">Question</span><span th:text="${p.question}">question</span></p>
+        <details th:if="${!p.answer.isEmpty()}">
+          <summary><span class="label">docs0 answered</span><span th:text="${p.answerPreview}">answer</span></summary>
+          <div class="quote" th:text="${p.answer}">full answer</div>
+        </details>
+        <form method="post" th:action="@{/admin/corrections/{id}/approve(id=${p.id})}">
+          <input type="hidden" name="_csrf" th:value="${csrf}">
+          <label class="label" th:for="${'text-' + p.id}">Correction (edit it before approving if needed)</label>
+          <textarea name="text" th:id="${'text-' + p.id}" th:text="${p.fact}" maxlength="2000">fact</textarea>
+          <div class="actions" style="margin-top:8px">
+            <button class="primary" type="submit">Approve</button>
+            <button class="danger" type="submit" th:formaction="@{/admin/corrections/{id}/reject(id=${p.id})}">Reject</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </th:block>
+
+  <!-- Unhappy answers -->
+  <th:block th:if="${tab == 'unhappy'}">
+    <h2>Unhappy answers</h2>
+    <div class="card" id="unhappy">
+      <div class="empty" th:if="${unhappy.isEmpty()}">No answer has had a thumbs down yet.</div>
+      <div class="item" th:each="u : ${unhappy}">
+        <p><b th:text="${u.asker}">U123</b> asked on <span th:text="${u.when}">time</span>
+          <span class="badge"><span th:text="${u.thumbsDown}">1</span> &#128078;</span></p>
+        <p><span class="label">Question</span><span th:text="${u.question}">question</span></p>
+        <details th:if="${!u.answer.isEmpty()}">
+          <summary><span class="label">docs0 answered</span>Show the answer</summary>
+          <div class="quote" th:text="${u.answer}">answer</div>
+        </details>
+        <p th:if="${!u.sources.isEmpty()}"><span class="label">Cited</span>
+          <th:block th:each="s, at : ${u.sources}">
+            <a th:if="${s.url != null and #strings.startsWith(s.url, 'https://')}" th:href="${s.url}"
+               th:text="${s.title}" rel="noreferrer">Title</a>
+            <span th:if="${s.url == null or !#strings.startsWith(s.url, 'https://')}" th:text="${s.title}">Title</span>
+            <span th:if="${!at.last}"> · </span>
+          </th:block>
+        </p>
+        <p th:if="${u.sources.isEmpty()}" class="sub">It cited no sources.</p>
+      </div>
+    </div>
+  </th:block>
+
+  <!-- Reviewed -->
+  <th:block th:if="${tab == 'reviewed'}">
+    <h2>Reviewed</h2>
+    <div class="card" id="reviewed">
+      <div class="empty" th:if="${reviewed.isEmpty()}">Nothing reviewed yet.</div>
+      <div class="item" th:each="r : ${reviewed}">
+        <p><span class="state" th:classappend="${r.approved ? 'UP' : 'DOWN'}"
+                 th:text="${r.approved ? 'Approved' : 'Rejected'}">Approved</span>
+          <span class="sub">on <span th:text="${r.when}">time</span> · from</span>
+          <b th:text="${r.author}">Arjun</b> <span class="badge" th:if="${r.dm}">DM</span></p>
+        <p><span class="label">Question</span><span th:text="${r.question}">question</span></p>
+        <p><span class="label">Correction</span><span class="quote" th:text="${r.fact}">fact</span></p>
+        <form method="post" th:action="@{/admin/corrections/{id}/unapprove(id=${r.id})}" th:if="${r.approved}">
+          <input type="hidden" name="_csrf" th:value="${csrf}">
+          <button type="submit">Un-approve</button>
+        </form>
+      </div>
+    </div>
+  </th:block>
+</main>
+</body>
+</html>

@@ -42,6 +42,7 @@ class QuestionHandlerTest {
     private final FakeMessenger slack = new FakeMessenger();
     private final FakeAgent agent = new FakeAgent();
     private final FakeKnowledge knowledge = new FakeKnowledge();
+    private final SlackFakes.FakeLlm llm = new SlackFakes.FakeLlm();
     private long tenantId;
     private QuestionHandler handler;
 
@@ -59,7 +60,13 @@ class QuestionHandlerTest {
                 new Docs0Properties.Slack("", ""),
                 new Docs0Properties.Drive(15, false), null, "", "", "");
         return new QuestionHandler(new TenantService(jdbc, props), agent, knowledge, new BudgetService(jdbc, props),
-                new ConversationRepository(jdbc), new InteractionRepository(jdbc), slack, statusInterval);
+                new ConversationRepository(jdbc), new InteractionRepository(jdbc), slack, correctionFlow(props), statusInterval);
+    }
+
+    private CorrectionFlow correctionFlow(Docs0Properties props) {
+        return new CorrectionFlow(new CorrectionDetector(llm, props), new ConversationRepository(jdbc),
+                new InteractionRepository(jdbc), new com.docs0.feedback.FeedbackRepository(jdbc),
+                new com.docs0.feedback.CorrectionRepository(jdbc), slack);
     }
 
     // ---- where the answer goes ---------------------------------------------------------------

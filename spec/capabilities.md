@@ -79,18 +79,31 @@ document count; last sync run; number of questions answered. `/health` returns J
 
 ## C5. Feedback and corrections (Phase 2)
 
-- 👎 on a docs0 answer records the answer as unsatisfactory and docs0 asks in thread what
-  was wrong. 👍 is recorded too.
-- A thread reply that corrects docs0 ("that's wrong, it's actually X") is stored as a
-  pending correction with author, question and the corrected fact.
-- An admin approves, edits or rejects corrections on the dashboard. Only approved
-  corrections influence answers.
-- An answer shaped by a correction says so: "per Arjun's correction on 2 Nov".
+- 👍 and 👎 reactions on a docs0 answer are recorded per user (a changed reaction updates
+  the row, a removed one deletes it). Reactions on other messages, other emoji and docs0's
+  own reactions are ignored. The first 👎 on an answer makes docs0 ask in thread what was
+  wrong; it asks once per answer and then waits up to 24 hours for the reply.
+- A thread (or DM) reply that corrects docs0 is stored as a pending correction with author,
+  the question that was answered, docs0's answer and the corrected fact. A reply is checked
+  only when a "what was wrong?" prompt is waiting or it contains a phrase like "that's
+  wrong", "actually," or "should be"; one small model call then decides correction or
+  question. A question, or a failed call, is answered normally. docs0 thanks the author and
+  says an admin will review it.
+- An admin approves (optionally editing the wording), rejects or later un-approves
+  corrections on the dashboard. Only approved corrections influence answers.
+- Before answering, up to three approved corrections that share keywords with the question
+  are put in front of the model; they outrank documents and are recorded on the
+  interaction. An answer shaped by one says so: "per Arjun's correction on 2 Nov". A
+  correction made in a DM is credited to "a teammate" and its question is never passed on.
 
 ## C6. Admin dashboard (Phase 2, grows each phase)
 
-Protected by an admin password. Pages: sources and sync log; unhappy answers and
-corrections queue; cost totals per day and month; (later) insights.
+Protected by an admin password. A shared top navigation links the pages: Sources (sources
+and sync log), Corrections (pending corrections, unhappy answers, reviewed corrections) and
+Costs (this month against the cap, a table per day for 30 days, the ten most expensive
+questions this month). Questions asked in a DM are shown anonymously in the unhappy
+answers list and on the Costs page. The status page shows how many corrections are pending.
+(Later: insights.)
 
 Connecting Google Drive from the dashboard is delivered in Phase 1 (C2). Later sources get
 the same connect, check access and sync-now treatment.
