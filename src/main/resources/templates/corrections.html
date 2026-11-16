@@ -36,7 +36,8 @@
           <span class="badge" th:if="${p.dm}">DM</span>
           <span class="sub">said, on <span th:text="${p.when}">time</span>:</span></p>
         <p><span class="label">Question</span><span th:text="${p.question}">question</span></p>
-        <details th:if="${!p.answer.isEmpty()}">
+        <p th:if="${p.redacted}" class="private-notice"><span class="label">docs0 answered</span><i th:text="${privateNotice}">notice</i></p>
+        <details th:if="${!p.redacted and !p.answer.isEmpty()}">
           <summary><span class="label">docs0 answered</span><span th:text="${p.answerPreview}">answer</span></summary>
           <div class="quote" th:text="${p.answer}">full answer</div>
         </details>
@@ -62,11 +63,12 @@
         <p><b th:text="${u.asker}">U123</b> asked on <span th:text="${u.when}">time</span>
           <span class="badge"><span th:text="${u.thumbsDown}">1</span> &#128078;</span></p>
         <p><span class="label">Question</span><span th:text="${u.question}">question</span></p>
-        <details th:if="${!u.answer.isEmpty()}">
+        <p th:if="${u.redacted}" class="private-notice"><span class="label">docs0 answered</span><i th:text="${privateNotice}">notice</i></p>
+        <details th:if="${!u.redacted and !u.answer.isEmpty()}">
           <summary><span class="label">docs0 answered</span>Show the answer</summary>
           <div class="quote" th:text="${u.answer}">answer</div>
         </details>
-        <p th:if="${!u.sources.isEmpty()}"><span class="label">Cited</span>
+        <p th:if="${!u.redacted and !u.sources.isEmpty()}"><span class="label">Cited</span>
           <th:block th:each="s, at : ${u.sources}">
             <a th:if="${s.url != null and #strings.startsWith(s.url, 'https://')}" th:href="${s.url}"
                th:text="${s.title}" rel="noreferrer">Title</a>
@@ -74,7 +76,7 @@
             <span th:if="${!at.last}"> · </span>
           </th:block>
         </p>
-        <p th:if="${u.sources.isEmpty()}" class="sub">It cited no sources.</p>
+        <p th:if="${!u.redacted and u.sources.isEmpty()}" class="sub">It cited no sources.</p>
       </div>
     </div>
   </th:block>

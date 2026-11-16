@@ -199,8 +199,51 @@ the run. Status page component `Grain`. docs0 only reads from Grain.
 
 ## C9. Gmail (Phase 5)
 
-Domain-wide delegation indexes each mailbox. Mail is visible only to its owner, so it is
-used only in that person's DM with docs0.
+**Built.** Source `Gmail` (kind `GMAIL`, visibility `SHARED` at source level; **every document is
+restricted**). Each mailbox is private to its owner: mail is used only when every person who will see
+the answer is a principal of the document, in practice the owner's own DM with docs0.
+
+**Credential.** A Google *service account* key (JSON) pasted by the admin on the Sources page (domain-wide
+delegation is the only way an admin can connect every mailbox; the Drive flow stays OAuth). Validated as a
+service-account key (`type`, `client_email`, `private_key` readable, numeric `client_id`) and stored whole,
+AES-256-GCM encrypted, in `source_credential.encrypted_secret`. It is never logged, echoed or rendered: the
+page shows only the service account's email and client ID (with setup steps for the Workspace Admin console:
+Domain-wide delegation, scope `gmail.readonly`, plus `admin.directory.user.readonly` only for the directory
+import). docs0 is strictly read-only toward Gmail and the directory.
+
+**Mailboxes.** `source.config` = `{"mailboxes":[{"email","viewers":[...]}], "adminEmail": "..."}`. The admin
+types addresses (one per line, validated, must be on a domain) or gives an admin email and loads people from
+the Admin SDK (`users.list`, non-suspended) and ticks them. Per mailbox an optional "also visible to" list
+(shared inboxes). Nothing is indexed until at least one mailbox is chosen. **Check access** makes one
+`users/{email}/profile` call per mailbox and shows a tick with the message count or the plain reason
+(delegation not authorised, Gmail API not enabled, not found, suspended).
+
+**Client.** `GmailClient` (network edge) and `HttpGmailClient` on plain REST (`java.net.http` + Gson, no Gmail
+library). Access tokens for `sub=<mailbox>` come from google-auth's `ServiceAccountCredentials` behind a
+`TokenSource`, cached per mailbox until two minutes before expiry. Calls: `threads.list` (`q`, `maxResults`,
+`pageToken`), `threads.get?format=full`, `getProfile`, directory `users.list`. 429, 5xx and rate-limit 403s are
+waited out as `Retry-After` says, a bounded number of times. Errors are mapped to plain messages; nothing
+contains a key, token or URL.
+
+**Connector.** One document per thread from the last `docs0.gmail.days` days (`DOCS0_GMAIL_HISTORY_DAYS`,
+default 90) matching `after:<epoch> -in:spam -in:trash -in:draft -category:promotions -category:social
+-category:forums`. `external_id` `gmail:<mailbox>:<threadId>`; title the subject (`(no subject)`); body the
+messages in order, each with From/To/Cc/Date then its text (plain preferred, else HTML converted; quoted
+`>` lines, "On ... wrote:" tails and short `-- ` signatures trimmed; attachment names listed, never fetched),
+capped at about 100,000 characters; `url` `https://mail.google.com/mail/u/<mailbox>/#all/<threadId>`; owner the
+mailbox; `modified_at` the last message; mime `application/vnd.google.gmail.thread`; principals the mailbox
+plus its viewers, lowercase. A thread's Gmail `historyId` is stored in `document.version` (V6) and a thread is
+re-fetched only when it changes. Principals are refreshed on every run (`refreshAccess`), so a removed viewer
+loses access at the next sync even for unchanged threads; threads no longer listed, and all mail of a mailbox
+that is no longer chosen, are marked deleted. A rejected delegation skips that mailbox (reason shown on the
+page, counted failed); a failing thread or mailbox never aborts the run; a rejected or unreadable key fails
+the run and deletes nothing. Status component `Gmail`.
+
+**Matching to Slack.** Mailbox principals are emails, so the Slack app needs `users:read.email`; when a
+person's email is unknown their mail is hidden from them.
+
+**Admin dashboard.** Answers that cited a restricted document are never rendered on admin pages (see
+`spec/agent.md`, "Admin pages and private answers").
 
 ## C10. Proactive and insights (Phase 6)
 

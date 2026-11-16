@@ -123,4 +123,33 @@ public class SourceRepository {
                 .param("source", sourceId)
                 .update();
     }
+
+    /** One text value stored in {@code source.config}, or null when there is none. */
+    public String configText(long tenantId, long sourceId, String key) {
+        return jdbc.sql("""
+                        SELECT s.config ->> CAST(:key AS text) FROM source s
+                        WHERE s.tenant_id = :tenant AND s.id = :source
+                        """)
+                .param("key", key)
+                .param("tenant", tenantId)
+                .param("source", sourceId)
+                .query(String.class)
+                .optional()
+                .orElse(null);
+    }
+
+    /** Sets (or, with null, removes) one text value in {@code source.config}; the other keys are kept. */
+    public void setConfigText(long tenantId, long sourceId, String key, String value) {
+        if (value == null) {
+            jdbc.sql("UPDATE source s SET config = s.config - CAST(:key AS text) WHERE s.tenant_id = :tenant AND s.id = :source")
+                    .param("key", key).param("tenant", tenantId).param("source", sourceId).update();
+            return;
+        }
+        jdbc.sql("""
+                        UPDATE source s
+                        SET config = jsonb_set(s.config, ARRAY[CAST(:key AS text)], to_jsonb(CAST(:value AS text)), TRUE)
+                        WHERE s.tenant_id = :tenant AND s.id = :source
+                        """)
+                .param("key", key).param("value", value).param("tenant", tenantId).param("source", sourceId).update();
+    }
 }

@@ -7,9 +7,9 @@ docs0 does not use vector search or embeddings. Claude searches a keyword index,
 whole documents, and answers only from what it read. Every quote in an answer is checked
 against the source document before it is shown.
 
-**Status:** Phase 3 — answers from Google Drive, Linear and Trello, and can file a Linear issue
-or Trello card when asked (after the asker confirms). Grain, Slack history and Gmail follow,
-one phase at a time. See [spec/roadmap.md](spec/roadmap.md).
+**Status:** Phase 5 — answers from Google Drive, Linear, Trello, Grain, Slack history and Gmail
+(each mailbox private to its owner), and can file a Linear issue or Trello card when asked (after the
+asker confirms). See [spec/roadmap.md](spec/roadmap.md).
 
 ## What you need
 
@@ -180,6 +180,61 @@ Until then Slack history still works for public channels and matches people by S
 Sources page shows a note that emails cannot be read. For each private channel, run
 `/invite @docs0` in it; the Sources page shows "invite @docs0 to #name" while docs0 is not in
 it.
+
+### Gmail (optional)
+
+docs0 can answer from your email, **with every mailbox private to its owner**. A Google Workspace
+administrator connects everyone once (domain-wide delegation); docs0 indexes the mailboxes you choose.
+A person's mail can appear in an answer only when everyone who will see that answer is entitled to it,
+which in practice means **in that person's own direct message with docs0**. It is never used in a
+channel, in a group chat or in anyone else's DM. Beyond the mailbox owner, you can list extra people
+per mailbox ("also visible to") for a shared inbox such as support@: the mailbox's mail is then also
+available in their DMs. **docs0 can read every mailbox you add**; it only ever reads (the Gmail
+scope is `gmail.readonly`) and never sends, changes or deletes anything.
+
+**What is indexed.** For each chosen mailbox, one document per conversation thread from the last
+`DOCS0_GMAIL_HISTORY_DAYS` days (default 90): subject, then each message with From, To, Cc and Date
+and its text (plain text preferred, HTML turned into text, quoted replies and short signatures
+trimmed). Attachment file names are listed; attachments are never downloaded. **Left out:** Spam, Trash,
+Drafts, and the Promotions, Social and Forums categories. A thread that is deleted, trashed, or older
+than the window is removed at the next sync; docs0 re-reads a thread only when Gmail says it changed.
+
+**Admin steps** (you must be a Workspace administrator; the Sources page repeats these):
+
+1. In [Google Cloud Console](https://console.cloud.google.com/) make or pick a project and enable the
+   **Gmail API** (**APIs & Services → Library**). If you want to pick people from your directory, also
+   enable the **Admin SDK API**.
+2. **IAM & Admin → Service Accounts → Create service account** (no roles needed). Open it, then
+   **Keys → Add key → Create new key → JSON**. A file downloads.
+3. Open **Sources → Gmail**, paste the whole contents of that file and press **Save key**. docs0
+   checks it and stores it encrypted (it needs `DOCS0_ENCRYPTION_KEY`, like the other tools). The key
+   is never shown again: the page shows only the service account's email and its **client ID**.
+4. In the [Admin console](https://admin.google.com/ac/owl/domainwidedelegation) go to **Security →
+   Access and data control → API controls → Domain-wide delegation → Add new**. Paste the client ID
+   from the Sources page and the scope `https://www.googleapis.com/auth/gmail.readonly`. Only if you
+   want the directory import, add `https://www.googleapis.com/auth/admin.directory.user.readonly`
+   too (comma separated). Press **Authorise**.
+5. Back on **Sources → Gmail**, choose the mailboxes: type email addresses, one per line, or give the
+   email of an administrator and press **Load people from Google Workspace** and tick the people to
+   include. Press **Save**. Optionally fill **Also visible to** for a shared inbox. Nothing is indexed
+   until at least one mailbox is chosen.
+6. Press **Check access**: each mailbox gets a ✓ with its message count, or the reason in plain words
+   (delegation not authorised, Gmail API not enabled, person not found or suspended). Then **Sync now**.
+
+Removing a mailbox or a viewer takes effect at the next sync (every few minutes, or **Sync now**).
+**Disconnect** deletes the key and removes all mail from answers. Setting a wrong or revoked key fails
+the run with a clear message and deletes nothing; a mailbox that cannot be read is skipped, shown with
+its reason, and the others carry on.
+
+**One thing people must know: Gmail matches a person to their Slack account by email, so the Slack
+app needs the `users:read.email` scope (added in the Slack history step above) and people's Slack
+email must be the same as their Gmail address.** Without it, or when someone's Slack email is hidden or
+different, their mail is simply not shown to them (docs0 errs on the side of hiding).
+
+**Admin pages never show private answers.** An answer that used a private source (a mailbox or a
+private channel) is not shown on the Corrections page ("Unhappy answers", or the original answer of a
+pending correction) or the Costs page: those show "This answer used a private source, so it isn't shown
+here." instead of its text, sources and quotes.
 
 ### Creating issues and cards
 

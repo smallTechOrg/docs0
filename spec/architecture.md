@@ -36,6 +36,7 @@ src/main/java/com/docs0/
   source/drive/                 DriveClient, DriveConnector, text extraction
   source/linear/, source/trello/  LinearClient/TrelloClient (network edge), connection, connector, rendering
   source/slack/                 Slack history connector (channel selection, rendering, sync)
+  source/gmail/                 GmailClient (network edge), service-account token source, connection, connector
   action/                       PendingAction, drafts repository, ActionService (the only writes)
   budget/                       BudgetService: hard monthly spend cap
   agent/                        AgentService (tool loop), tools, AnswerVerifier, LlmClient
@@ -128,14 +129,25 @@ Phase 4a adds (migration `V5__access_control.sql`):
   is null when the app lacks the `users:read.email` scope. (`deleted` marks deactivated users.)
 - `source.kind` value `SLACK` (name `Slack history`, config `{"channels":[{"id","name","private"}]}`).
 
-Later phases add per-mailbox principals (Gmail) and channel settings.
+Phase 5 adds (migration `V6__gmail_and_private_answers.sql`):
+
+- `document.version text` (nullable): the source's version of an item, used to skip unchanged items
+  (Gmail's thread `historyId`).
+- `interaction.used_restricted boolean not null default false`: set when the answer cited a restricted
+  document; admin pages also join the cited ids to `document.restricted`.
+- `source.kind` value `GMAIL` (name `Gmail`, visibility `SHARED`, every document restricted). Its secret is
+  the service account key JSON in `source_credential.encrypted_secret`; `config` is
+  `{"mailboxes":[{"email","viewers":[...]}], "adminEmail": "..."}`. Each thread's principals are the mailbox
+  email plus its viewers.
+
+Later phases add channel settings.
 
 ## Access model (implemented in Phase 4a)
 
 A document is either **shared** (`restricted = false`, the default: Drive, Linear, Trello, public
 Slack channels) or **restricted** (`restricted = true`), in which case `document_principal` holds who
 may see it: for a private Slack channel, the channel's current members (Slack ids, plus their emails
-when known); later, the mailbox owner for Gmail. Writes replace the principal set (`DocumentStore.
+when known); for Gmail, the mailbox owner's email plus any extra viewers of that mailbox. Writes replace the principal set (`DocumentStore.
 upsertRestricted`) and `refreshAccess` brings unchanged documents up to date, so a membership change
 lands at the next sync.
 

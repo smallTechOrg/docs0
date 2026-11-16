@@ -43,6 +43,9 @@ docs0:
   grain:
     # How many days of Grain recordings (notes and transcripts) are indexed.
     days: ${DOCS0_GRAIN_HISTORY_DAYS:365}
+  gmail:
+    # How many days of mail (threads) are indexed for each chosen mailbox.
+    days: ${DOCS0_GMAIL_HISTORY_DAYS:90}
   google:
     # OAuth client an admin signs in through on the Sources page.
     oauth-client-id: ${DOCS0_GOOGLE_OAUTH_CLIENT_ID:}

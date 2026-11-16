@@ -40,7 +40,7 @@ public class DocumentStore {
 
     /** Inserts or replaces the document with this external id, and brings it back if it was deleted. */
     public void upsert(long tenantId, long sourceId, DocumentWrite doc) {
-        insert(tenantId, sourceId, doc, false);
+        insert(tenantId, sourceId, doc, false, null);
     }
 
     /**
@@ -51,7 +51,14 @@ public class DocumentStore {
      */
     @Transactional
     public void upsertRestricted(long tenantId, long sourceId, DocumentWrite doc, Set<String> principals) {
-        long id = insert(tenantId, sourceId, doc, true);
+        upsertRestricted(tenantId, sourceId, doc, principals, null);
+    }
+
+    /** As above, also storing the source's {@code version} of the item (see {@link #versions}). */
+    @Transactional
+    public void upsertRestricted(long tenantId, long sourceId, DocumentWrite doc, Set<String> principals,
+                                 String version) {
+        long id = insert(tenantId, sourceId, doc, true, version);
         jdbc.sql("DELETE FROM document_principal WHERE tenant_id = :tenant AND document_id = :id")
                 .param("tenant", tenantId).param("id", id).update();
         for (String principal : normalise(principals)) {
@@ -100,15 +107,15 @@ public class DocumentStore {
         }
     }
 
-    private long insert(long tenantId, long sourceId, DocumentWrite doc, boolean restricted) {
+    private long insert(long tenantId, long sourceId, DocumentWrite doc, boolean restricted, String version) {
         String body = clean(doc.body());
         String title = clean(doc.title());
         return jdbc.sql("""
                         INSERT INTO document (tenant_id, source_id, external_id, title, mime_type, url, owner_name,
                                               owner_email, modified_at, body, body_chars, content_hash, deleted,
-                                              restricted, synced_at)
+                                              restricted, version, synced_at)
                         VALUES (:tenant, :source, :externalId, :title, :mimeType, :url, :ownerName,
-                                :ownerEmail, :modifiedAt, :body, :bodyChars, :hash, FALSE, :restricted, now())
+                                :ownerEmail, :modifiedAt, :body, :bodyChars, :hash, FALSE, :restricted, :version, now())
                         ON CONFLICT (tenant_id, source_id, external_id) DO UPDATE SET
                             title = EXCLUDED.title,
                             mime_type = EXCLUDED.mime_type,
@@ -121,6 +128,7 @@ public class DocumentStore {
                             content_hash = EXCLUDED.content_hash,
                             deleted = FALSE,
                             restricted = EXCLUDED.restricted,
+                            version = EXCLUDED.version,
                             synced_at = now()
                         RETURNING id
                         """)
@@ -137,8 +145,24 @@ public class DocumentStore {
                 .param("bodyChars", body.length())
                 .param("hash", sha256(body))
                 .param("restricted", restricted)
+                .param("version", version, java.sql.Types.VARCHAR)
                 .query(Long.class)
                 .single();
+    }
+
+    /** External id -> the version stored with every live document of the source that has one. */
+    public Map<String, String> versions(long tenantId, long sourceId) {
+        Map<String, String> result = new HashMap<>();
+        jdbc.sql("""
+                        SELECT external_id, version FROM document
+                        WHERE tenant_id = :tenant AND source_id = :source AND NOT deleted AND version IS NOT NULL
+                        """)
+                .param("tenant", tenantId)
+                .param("source", sourceId)
+                .query(rs -> {
+                    result.put(rs.getString("external_id"), rs.getString("version"));
+                });
+        return result;
     }
 
     /** What is stored about one live document, for deciding whether a rewrite is needed. */

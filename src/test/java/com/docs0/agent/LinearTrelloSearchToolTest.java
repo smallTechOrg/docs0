@@ -78,7 +78,7 @@ class LinearTrelloSearchToolTest {
         ask();
 
         assertThat(llm.resultFor(bad).isError()).isTrue();
-        assertThat(llm.resultFor(bad).content()).contains("GOOGLE_DRIVE, LINEAR, TRELLO, SLACK, GRAIN");
+        assertThat(llm.resultFor(bad).content()).contains("GOOGLE_DRIVE, LINEAR, TRELLO, SLACK, GRAIN, GMAIL");
         assertThat(llm.resultFor(notAList).isError()).isTrue();
     }
 
@@ -108,7 +108,7 @@ class LinearTrelloSearchToolTest {
         assertThat(kinds.get("type")).isEqualTo("array");
         @SuppressWarnings("unchecked")
         Map<String, Object> items = (Map<String, Object>) kinds.get("items");
-        assertThat(items.get("enum")).isEqualTo(List.of("GOOGLE_DRIVE", "LINEAR", "TRELLO", "SLACK", "GRAIN"));
+        assertThat(items.get("enum")).isEqualTo(List.of("GOOGLE_DRIVE", "LINEAR", "TRELLO", "SLACK", "GRAIN", "GMAIL"));
         assertThat(search.required()).containsExactly("query");
         assertThat(search.description()).contains("Linear", "Trello");
     }

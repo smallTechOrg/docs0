@@ -41,5 +41,12 @@ class ToolSourcesSetupPageTest extends IntegrationTest {
 
         assertThat(jdbc.sql("SELECT count(*) FROM source_credential").query(Long.class).single()).isZero();
         assertThat(linearApi.keysSeen).isEmpty();
+
+        assertThat(html).contains("id=\"gmail-setup\"").doesNotContain("name=\"key\"");
+        mvc.perform(post("/admin/sources/gmail/connect").session(session)
+                        .param("_csrf", (String) session.getAttribute("docs0.csrf"))
+                        .param("key", com.docs0.source.gmail.TestKeys.json()))
+                .andExpect(status().isFound());
+        assertThat(jdbc.sql("SELECT count(*) FROM source_credential").query(Long.class).single()).isZero();
     }
 }

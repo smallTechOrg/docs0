@@ -47,7 +47,8 @@
     <div class="empty" th:if="${top.isEmpty()}">No questions have cost anything this month.</div>
     <div class="row" th:each="t : ${top}">
       <div class="name" th:if="${t.dm}"><i>DM question</i></div>
-      <div class="name" th:if="${!t.dm}" th:text="${t.question}">question</div>
+      <div class="name" th:if="${!t.dm and t.redacted}"><i>Question not shown (private source)</i></div>
+      <div class="name" th:if="${!t.dm and !t.redacted}" th:text="${t.question}">question</div>
       <div class="detail" th:text="${t.when}">time</div>
       <div class="state">$<span th:text="${#numbers.formatDecimal(t.costUsd, 1, 'COMMA', 4, 'POINT')}">0.0000</span></div>
     </div>

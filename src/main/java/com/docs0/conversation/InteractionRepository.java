@@ -4,8 +4,11 @@ import com.docs0.agent.Agent.AgentResult;
 import com.docs0.agent.Agent.Citation;
 import java.math.BigDecimal;
 import java.sql.Types;
+import java.util.Collection;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
@@ -33,18 +36,51 @@ public class InteractionRepository {
             AgentResult result, String answerTs) {
         List<Long> correctionIds = result.correctionIds() == null ? List.of() : result.correctionIds();
         List<Citation> citations = result.citations() == null ? List.of() : result.citations();
+        boolean restricted = anyRestricted(tenantId, citations.stream().map(Citation::documentId).toList());
         return insertRow(tenantId, conversationId, slackUserId, question, result.answer(), result.kind().name(),
                 result.confidence() == null ? null : result.confidence().name(), JSON.writeValueAsString(citations),
                 result.steps(), result.inputTokens(), result.outputTokens(),
                 result.costUsd() == null ? BigDecimal.ZERO : result.costUsd(), result.durationMs(), result.error(),
-                answerTs, JSON.writeValueAsString(correctionIds));
+                answerTs, JSON.writeValueAsString(correctionIds), restricted);
+    }
+
+    /** True when any of these documents is restricted (a private channel, a mailbox). */
+    private boolean anyRestricted(long tenantId, List<Long> documentIds) {
+        if (documentIds.isEmpty()) {
+            return false;
+        }
+        return jdbc.sql("SELECT EXISTS (SELECT 1 FROM document WHERE tenant_id = :tenantId AND restricted AND id IN (:ids))")
+                .param("tenantId", tenantId).param("ids", documentIds)
+                .query(Boolean.class).single();
+    }
+
+    /**
+     * Which of these answers used a restricted document, so admin pages must not show their text. An
+     * answer counts when it was logged as such, or when any document it cited is restricted now (which
+     * also covers answers logged before the flag existed). Err on the side of hiding.
+     */
+    public Set<Long> usedRestricted(long tenantId, Collection<Long> interactionIds) {
+        if (interactionIds == null || interactionIds.isEmpty()) {
+            return Set.of();
+        }
+        return new HashSet<>(jdbc.sql("""
+                        SELECT i.id FROM interaction i
+                        WHERE i.tenant_id = :tenantId AND i.id IN (:ids)
+                          AND (i.used_restricted OR EXISTS (
+                                SELECT 1 FROM jsonb_array_elements(
+                                         CASE WHEN jsonb_typeof(i.citations) = 'array' THEN i.citations ELSE '[]'::jsonb END) c
+                                JOIN document d ON d.tenant_id = i.tenant_id AND CAST(d.id AS text) = c ->> 'documentId'
+                                WHERE d.restricted))
+                        """)
+                .param("tenantId", tenantId).param("ids", List.copyOf(interactionIds))
+                .query(Long.class).list());
     }
 
     /** Stores a question that was refused because the monthly budget is used up. No model call, no cost. */
     public long insertOverBudget(long tenantId, long conversationId, String slackUserId, String question,
             String reply, String answerTs) {
         return insertRow(tenantId, conversationId, slackUserId, question, reply, KIND_OVER_BUDGET, null, "[]",
-                0, 0, 0, BigDecimal.ZERO, 0, null, answerTs, "[]");
+                0, 0, 0, BigDecimal.ZERO, 0, null, answerTs, "[]", false);
     }
 
     /** A logged answer as feedback and corrections need to see it. */
@@ -110,14 +146,14 @@ public class InteractionRepository {
     // conversation does not belong to the tenant.
     private long insertRow(long tenantId, long conversationId, String slackUserId, String question, String answer,
             String kind, String confidence, String citationsJson, int steps, long inputTokens, long outputTokens,
-            BigDecimal costUsd, long durationMs, String error, String answerTs, String correctionIdsJson) {
+            BigDecimal costUsd, long durationMs, String error, String answerTs, String correctionIdsJson, boolean usedRestricted) {
         return jdbc.sql("""
                         INSERT INTO interaction (tenant_id, conversation_id, slack_user_id, question, answer, kind,
                             confidence, citations, steps, input_tokens, output_tokens, cost_usd, duration_ms, error,
-                            answer_ts, correction_ids)
+                            answer_ts, correction_ids, used_restricted)
                         SELECT c.tenant_id, c.id, :slackUserId, :question, :answer, :kind,
                             :confidence, CAST(:citations AS jsonb), :steps, :inputTokens, :outputTokens, :costUsd,
-                            :durationMs, :error, :answerTs, CAST(:correctionIds AS jsonb)
+                            :durationMs, :error, :answerTs, CAST(:correctionIds AS jsonb), :usedRestricted
                         FROM conversation c
                         WHERE c.id = :conversationId AND c.tenant_id = :tenantId
                         RETURNING id
@@ -138,6 +174,7 @@ public class InteractionRepository {
                 .param("error", error, Types.VARCHAR)
                 .param("answerTs", answerTs, Types.VARCHAR)
                 .param("correctionIds", correctionIdsJson)
+                .param("usedRestricted", usedRestricted)
                 .query(Long.class)
                 .single();
     }

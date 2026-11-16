@@ -84,11 +84,12 @@ public class SourcesController {
     private final DocumentStore documents;
     private final ToolPanels toolPanels;
     private final SlackHistoryPanel slackHistory;
+    private final GmailPanel gmail;
 
     public SourcesController(Docs0Properties props, TenantService tenants, DriveConnection connection,
                              DriveClient drive, DriveConnector connector, GoogleOAuth oauth, FolderCounts counts,
                              SyncService syncService, SyncRunRepository runs, DocumentStore documents,
-                             ToolPanels toolPanels, SlackHistoryPanel slackHistory) {
+                             ToolPanels toolPanels, SlackHistoryPanel slackHistory, GmailPanel gmail) {
         this.props = props;
         this.tenants = tenants;
         this.connection = connection;
@@ -101,6 +102,7 @@ public class SourcesController {
         this.documents = documents;
         this.toolPanels = toolPanels;
         this.slackHistory = slackHistory;
+        this.gmail = gmail;
     }
 
     @GetMapping(PAGE)
@@ -110,6 +112,7 @@ public class SourcesController {
         long tenantId = tenants.current().id();
         toolPanels.addTo(model, tenantId, confirm);
         slackHistory.addTo(model, tenantId);
+        gmail.addTo(model, tenantId, confirm);
         model.addAttribute("csrf", AdminGuard.csrfToken(request.getSession()));
         model.addAttribute("tenantName", tenants.current().name());
         model.addAttribute("redirectUri", props.googleRedirectUri());

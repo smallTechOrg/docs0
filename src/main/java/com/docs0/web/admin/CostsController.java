@@ -2,12 +2,14 @@ package com.docs0.web.admin;
 
 import com.docs0.budget.BudgetService;
 import com.docs0.budget.CostReport;
+import com.docs0.conversation.InteractionRepository;
 import com.docs0.tenant.TenantService;
 import java.math.BigDecimal;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -27,16 +29,19 @@ public class CostsController {
 
     public record DayRow(String day, long questions, long inputTokens, long outputTokens, BigDecimal costUsd) {}
 
-    public record TopRow(String question, boolean dm, String when, BigDecimal costUsd) {}
+    public record TopRow(String question, boolean dm, boolean redacted, String when, BigDecimal costUsd) {}
 
     private final TenantService tenants;
     private final BudgetService budget;
     private final CostReport report;
+    private final InteractionRepository interactions;
 
-    public CostsController(TenantService tenants, BudgetService budget, CostReport report) {
+    public CostsController(TenantService tenants, BudgetService budget, CostReport report,
+            InteractionRepository interactions) {
         this.tenants = tenants;
         this.budget = budget;
         this.report = report;
+        this.interactions = interactions;
     }
 
     @GetMapping(PAGE)
@@ -52,9 +57,17 @@ public class CostsController {
                 .map(d -> new DayRow(DAY.format(d.day()), d.questions(), d.inputTokens(), d.outputTokens(),
                         d.costUsd()))
                 .toList();
-        List<TopRow> top = report.topQuestionsThisMonth(tenantId, TOP).stream()
-                .map(e -> new TopRow(e.dm() ? null : CorrectionsController.truncate(e.question(), MAX_QUESTION_CHARS),
-                        e.dm(), TIME.format(e.createdAt()), e.costUsd()))
+        var expensive = report.topQuestionsThisMonth(tenantId, TOP);
+        // A question whose answer used a private source is not shown either.
+        Set<Long> privateAnswers = interactions.usedRestricted(tenantId,
+                expensive.stream().map(CostReport.Expensive::interactionId).toList());
+        List<TopRow> top = expensive.stream()
+                .map(e -> {
+                    boolean redacted = privateAnswers.contains(e.interactionId());
+                    return new TopRow(e.dm() || redacted ? null
+                            : CorrectionsController.truncate(e.question(), MAX_QUESTION_CHARS),
+                            e.dm(), redacted, TIME.format(e.createdAt()), e.costUsd());
+                })
                 .toList();
 
         model.addAttribute("tenantName", tenants.current().name());

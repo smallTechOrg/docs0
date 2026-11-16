@@ -45,11 +45,28 @@ tenant or user id.
 Every `search_knowledge`, `read_document` and `list_recent_documents` call, and the
 `AnswerVerifier`, runs with the request's `Audience`: the people who will see the answer (every
 member of the channel, or the one person in a DM, as `(Slack id, email?)` pairs; bots and
-deactivated users excluded). A restricted document (a private Slack channel's history, later a
+deactivated users excluded). A restricted document (a private Slack channel's history, a Gmail
 mailbox) is eligible only if every audience member is among its principals; an empty audience gets
 shared knowledge only. The filter is in the SQL of each query, so a document the audience may not see
 produces no hit, snippet or title, `read_document` on its id gives the same "not found" as a missing
 id, and a citation to it is dropped by the verifier. The model is never told that anything was hidden.
+
+Gmail threads (source `GMAIL`, one document per thread, restricted to the mailbox owner and any extra
+viewers) are therefore reachable only in the owner's own DM. The system prompt tells the model that mail is
+private to its owner, to say when something comes from the person's email, to quote only what a message
+says, and never to speculate about other people's mail. `GMAIL` is one of the `source_kinds` of
+`search_knowledge`.
+
+### Admin pages and private answers
+
+An interaction is *private* when it cited a restricted document (a private Slack channel, a mailbox). It is
+decided at render time by joining the cited document ids to `document.restricted` (so answers logged before
+Phase 5 are covered), and `interaction.used_restricted` records it at answer time as well; either one makes
+it private. For a private interaction no admin page renders its answer text, cited titles, URLs or quotes:
+the Corrections page ("Unhappy answers", and the "docs0 answered" original answer of a pending correction
+made in reply to it) shows the notice "This answer used a private source, so it isn't shown here."; the
+Costs page's most-expensive list shows "Question not shown (private source)" instead of the question. The
+question text and metadata stay elsewhere (DM questions already show as "DM").
 
 ### Creating issues and cards: the confirm gate
 

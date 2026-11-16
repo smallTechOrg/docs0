@@ -1,6 +1,7 @@
 package com.docs0.web.admin;
 
 import com.docs0.source.grain.FakeGrainClient;
+import com.docs0.source.gmail.FakeGmailClient;
 import com.docs0.source.linear.FakeLinearClient;
 import com.docs0.source.trello.FakeTrelloClient;
 import org.springframework.boot.test.context.TestConfiguration;
@@ -27,5 +28,11 @@ public class FakeToolClientsConfig {
     @Primary
     FakeGrainClient fakeGrainClient() {
         return new FakeGrainClient();
+    }
+
+    @Bean
+    @Primary
+    FakeGmailClient fakeGmailClient() {
+        return new FakeGmailClient();
     }
 }

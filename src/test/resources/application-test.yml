@@ -24,6 +24,8 @@ docs0:
     days: 3
   grain:
     days: 30
+  gmail:
+    days: 7
   google:
     oauth-client-id: ""
     oauth-client-secret: ""

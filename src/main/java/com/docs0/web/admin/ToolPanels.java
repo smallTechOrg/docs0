@@ -60,7 +60,7 @@ public class ToolPanels {
     private static final int RECENT_RUNS = 5;
     private static final Map<String, String> KIND_LABELS = Map.of(
             "GOOGLE_DRIVE", "Google Drive", "LINEAR", "Linear", "TRELLO", "Trello", "SLACK", "Slack history",
-            "GRAIN", "Grain");
+            "GRAIN", "Grain", "GMAIL", "Gmail");
 
     private record Cached<T>(List<T> items, Instant at) {}
 
