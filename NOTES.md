@@ -41,3 +41,13 @@ Run started: 2026-11-17 01:24 IST.
   own, and the gcloud login had no Drive scope. → Asked the owner to share, and started
   a gcloud re-login with Drive access. Lesson: intake should ask who owns the content
   and plan the access grant as a first-class setup step, ideally in the product UI.
+- **Service account abandoned mid-build.** The Drive service account was created, keyed
+  and wired, then dropped when the owner decided Drive must be connected from the
+  dashboard. → Deleted the account and key, rewrote the spec section, rebuilt as an
+  OAuth sign-in with a folder picker. Lesson: ask "how will a non-technical admin set
+  this up?" during intake; it decides the integration's whole shape.
+- **A worker was blocked from listing `.env` variable names.** The safety check stopped
+  it and it correctly did not retry. Lesson: briefs should say how to check a variable is
+  set (the app's own status page), not just "never open .env".
+- **Model switched mid-run (Fable to Sonnet 5.5) at the owner's request.** Context carried
+  over through the transcript; no rework needed.
