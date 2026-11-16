@@ -127,6 +127,39 @@ class SyncServiceTest extends IntegrationTest {
     }
 
     @Test
+    void backgroundSyncIsInTheLogAsRunningBeforeItReturnsAndRefusesASecondStart() throws Exception {
+        CountDownLatch release = new CountDownLatch(1);
+        StubConnector connector = new StubConnector(() -> {
+            release.await(10, TimeUnit.SECONDS);
+            return new SyncCounts(1, 0, 0, 0, 0);
+        });
+
+        assertThat(syncService.startInBackground(connector)).isTrue();
+
+        long sourceId = sources.find(tenant.id(), "STUB", "Stub").orElseThrow().id();
+        assertThat(runs.latest(tenant.id(), sourceId).orElseThrow().status()).isEqualTo(SyncRun.RUNNING);
+        assertThat(syncService.isRunning(sourceId)).isTrue();
+        assertThat(syncService.startInBackground(connector)).isFalse();
+
+        release.countDown();
+        org.awaitility.Awaitility.await().atMost(10, TimeUnit.SECONDS)
+                .until(() -> !syncService.isRunning(sourceId));
+        SyncRun finished = runs.latest(tenant.id(), sourceId).orElseThrow();
+        assertThat(finished.status()).isEqualTo(SyncRun.OK);
+        assertThat(finished.counts()).isEqualTo(new SyncCounts(1, 0, 0, 0, 0));
+        assertThat(runs.recent(tenant.id(), sourceId, 5)).hasSize(1);
+    }
+
+    @Test
+    void sourceAccessProblemsAreRecordedInTheAdminsWords() {
+        StubConnector connector = new StubConnector(() -> {
+            throw new SourceAccessException("Reconnect it.");
+        });
+
+        assertThat(syncService.run(connector).orElseThrow().error()).isEqualTo("Reconnect it.");
+    }
+
+    @Test
     void schedulingDoesNothingWhenDriveIsNotConfigured() {
         scheduler.onReady();
         scheduler.syncAll();

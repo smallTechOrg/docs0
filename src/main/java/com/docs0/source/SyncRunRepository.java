@@ -4,6 +4,7 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.Instant;
 import java.time.OffsetDateTime;
+import java.util.List;
 import java.util.Optional;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.core.simple.JdbcClient;
@@ -69,6 +70,20 @@ public class SyncRunRepository {
                 .param("source", sourceId)
                 .query(MAPPER)
                 .optional();
+    }
+
+    /** The most recently started runs of a source, newest first. */
+    public List<SyncRun> recent(long tenantId, long sourceId, int limit) {
+        return jdbc.sql("""
+                        SELECT %s FROM sync_run
+                        WHERE tenant_id = :tenant AND source_id = :source
+                        ORDER BY started_at DESC, id DESC LIMIT :limit
+                        """.formatted(COLUMNS))
+                .param("tenant", tenantId)
+                .param("source", sourceId)
+                .param("limit", limit)
+                .query(MAPPER)
+                .list();
     }
 
     private static Instant instant(ResultSet rs, String column) throws SQLException {

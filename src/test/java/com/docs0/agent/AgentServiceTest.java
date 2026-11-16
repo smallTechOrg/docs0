@@ -45,7 +45,7 @@ class AgentServiceTest {
                 null,
                 new Docs0Properties.Anthropic(
                         apiKey, "claude-sonnet-5-5", new BigDecimal("2.00"), new BigDecimal("10.00"), maxSteps),
-                null, null, null);
+                null, null, null, null, null, null, null);
         Clock clock = Clock.fixed(Instant.parse("2026-11-17T09:30:00Z"), ZoneOffset.UTC);
         return new AgentService(llm, knowledge, properties, clock);
     }

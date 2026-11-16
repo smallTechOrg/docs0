@@ -35,7 +35,15 @@ docs0:
     bot-token: ${DOCS0_SLACK_BOT_TOKEN:}
     app-token: ${DOCS0_SLACK_APP_TOKEN:}
   drive:
-    credentials-file: ${DOCS0_GOOGLE_CREDENTIALS_FILE:}
-    folder-ids: ${DOCS0_DRIVE_FOLDER_IDS:}
     sync-interval-minutes: ${DOCS0_DRIVE_SYNC_INTERVAL_MINUTES:15}
     sync-on-startup: ${DOCS0_DRIVE_SYNC_ON_STARTUP:true}
+  google:
+    # OAuth client an admin signs in through on the Sources page.
+    oauth-client-id: ${DOCS0_GOOGLE_OAUTH_CLIENT_ID:}
+    oauth-client-secret: ${DOCS0_GOOGLE_OAUTH_CLIENT_SECRET:}
+  # Base64 of 32 random bytes. Encrypts the stored Google grant.
+  encryption-key: ${DOCS0_ENCRYPTION_KEY:}
+  # Where a browser reaches this app. The Google redirect URI is <public-url>/admin/sources/google/callback.
+  public-url: ${DOCS0_PUBLIC_URL:http://localhost:${server.port}}
+  # Password for /admin pages (user "admin"). Empty: /admin is served to the local machine only.
+  admin-password: ${DOCS0_ADMIN_PASSWORD:}

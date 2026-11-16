@@ -57,7 +57,7 @@ class QuestionHandlerTest {
                 new Docs0Properties.Anthropic("", "test-model", new BigDecimal("2"), new BigDecimal("10"), 12),
                 new Docs0Properties.Budget(monthlyBudget),
                 new Docs0Properties.Slack("", ""),
-                new Docs0Properties.Drive("", "", 15, false));
+                new Docs0Properties.Drive(15, false), null, "", "", "");
         return new QuestionHandler(new TenantService(jdbc, props), agent, knowledge, new BudgetService(jdbc, props),
                 new ConversationRepository(jdbc), new InteractionRepository(jdbc), slack, statusInterval);
     }

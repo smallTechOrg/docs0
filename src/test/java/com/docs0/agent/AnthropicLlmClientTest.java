@@ -138,7 +138,7 @@ class AnthropicLlmClientTest {
         Docs0Properties properties = new Docs0Properties(
                 null,
                 new Docs0Properties.Anthropic("", "claude-sonnet-5-5", BigDecimal.ONE, BigDecimal.TEN, 12),
-                null, null, null);
+                null, null, null, null, null, null, null);
 
         AnthropicLlmClient client = new AnthropicLlmClient(properties);
 

@@ -3,29 +3,28 @@ package com.docs0.source.drive;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.docs0.IntegrationTest;
-import com.docs0.config.Docs0Properties;
+import com.docs0.crypto.TokenCipher;
 import com.docs0.knowledge.Audience;
 import com.docs0.knowledge.Document;
 import com.docs0.knowledge.DocumentStore;
 import com.docs0.knowledge.KnowledgeSearch;
 import com.docs0.knowledge.SearchHit;
+import com.docs0.source.Folder;
 import com.docs0.source.Source;
+import com.docs0.source.SourceCredentialRepository;
 import com.docs0.source.SourceRepository;
 import com.docs0.source.SyncCounts;
 import com.docs0.source.SyncRun;
 import com.docs0.source.SyncRunRepository;
+import com.docs0.source.SyncScheduler;
 import com.docs0.source.SyncService;
 import com.docs0.web.StatusContributor.ComponentStatus;
 import com.docs0.web.StatusContributor.State;
-import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
 import org.springframework.beans.factory.annotation.Autowired;
 
 class DriveSyncTest extends IntegrationTest {
@@ -49,21 +48,26 @@ class DriveSyncTest extends IntegrationTest {
     @Autowired
     KnowledgeSearch search;
 
-    /** The application's own connector: Drive is not configured in the test profile. */
     @Autowired
-    DriveConnector unconfigured;
+    SourceCredentialRepository credentials;
 
-    @TempDir
-    Path tmp;
+    /** The application's own connector: nothing is connected in the test profile. */
+    @Autowired
+    DriveConnector unconnected;
 
     FakeDriveClient drive;
+    DriveConnection connection;
     DriveConnector connector;
 
+    /** Drive connected as asha@example.com with the fake's "main" folder chosen. */
     @BeforeEach
-    void setUp() throws IOException {
+    void setUp() {
         drive = new FakeDriveClient();
-        Path credentials = Files.writeString(tmp.resolve("service-account.json"), "{}");
-        connector = connector(credentials.toString(), "");
+        connection = new DriveConnection(DriveTestSetup.props(), new TokenCipher(DriveTestSetup.ENCRYPTION_KEY),
+                sources, credentials, store);
+        connector = new DriveConnector(drive, connection, store, runs, tenants);
+        connection.connect(tenant.id(), "asha@example.com", "refresh-token");
+        connection.addFolder(tenant.id(), new Folder(FakeDriveClient.MAIN, "Main"));
     }
 
     @Test
@@ -265,58 +269,255 @@ class DriveSyncTest extends IntegrationTest {
     }
 
     @Test
-    void configuredFolderIdsArePassedToTheClient() {
-        connector = connector(tmp.resolve("service-account.json").toString(), " folderA, folderB ,");
-        syncService.run(connector);
-        assertThat(drive.lastFolderIds).containsExactly("folderA", "folderB");
+    void onlyTheChosenFoldersAreSynced() {
+        drive.folder("sub", "Sub", FakeDriveClient.MAIN);
+        drive.folder("other", "Other", DriveClient.MY_DRIVE);
+        drive.put("a", "In main", "text/plain", T0, "main okapi");
+        drive.putIn("sub", "b", "In sub", "text/plain", T0, "nested okapi");
+        drive.putIn("other", "c", "In other", "text/plain", T0, "unchosen okapi");
 
-        connector = connector(tmp.resolve("service-account.json").toString(), "");
-        syncService.run(connector);
-        assertThat(drive.lastFolderIds).isEmpty();
+        SyncRun run = syncService.run(connector).orElseThrow();
+
+        assertThat(drive.lastFolderIds).containsExactly(FakeDriveClient.MAIN);
+        assertThat(run.counts()).isEqualTo(new SyncCounts(2, 0, 0, 0, 0));
+        assertThat(search.search(tenant.id(), ANYONE, "okapi", 8).hits())
+                .extracting(SearchHit::title).containsExactlyInAnyOrder("In main", "In sub");
+
+        connection.addFolder(tenant.id(), new Folder("other", "Other"));
+        assertThat(syncService.run(connector).orElseThrow().counts()).isEqualTo(new SyncCounts(1, 0, 0, 0, 0));
+        assertThat(drive.lastFolderIds).containsExactly(FakeDriveClient.MAIN, "other");
+        assertThat(search.search(tenant.id(), ANYONE, "okapi", 8).hits()).hasSize(3);
     }
 
     @Test
-    void statusIsOffWhenNotConfigured() {
-        ComponentStatus status = unconfigured.status();
+    void removingAFolderDropsItsDocumentsFromSearchAtTheNextSync() {
+        drive.folder("other", "Other", DriveClient.MY_DRIVE);
+        connection.addFolder(tenant.id(), new Folder("other", "Other"));
+        drive.put("a", "In main", "text/plain", T0, "main okapi");
+        drive.putIn("other", "c", "In other", "text/plain", T0, "other okapi");
+        syncService.run(connector);
+        assertThat(search.search(tenant.id(), ANYONE, "okapi", 8).hits()).hasSize(2);
+
+        connection.removeFolder(tenant.id(), "other");
+        // Not before the next sync.
+        assertThat(search.search(tenant.id(), ANYONE, "okapi", 8).hits()).hasSize(2);
+        SyncRun run = syncService.run(connector).orElseThrow();
+
+        assertThat(run.counts()).isEqualTo(new SyncCounts(0, 0, 1, 0, 0));
+        assertThat(search.search(tenant.id(), ANYONE, "okapi", 8).hits())
+                .extracting(SearchHit::title).containsExactly("In main");
+    }
+
+    @Test
+    void clearingTheSelectionDropsEveryDocumentAtTheNextSyncWithoutCallingDrive() {
+        drive.put("a", "Alpha", "text/plain", T0, "alpha okapi");
+        drive.put("b", "Beta", "text/plain", T0, "beta okapi");
+        syncService.run(connector);
+        int callsBefore = drive.calls;
+
+        connection.removeFolder(tenant.id(), FakeDriveClient.MAIN);
+        // Leftover documents are work for the scheduler, once.
+        assertThat(connector.configured()).isTrue();
+        scheduler(connector).syncAll();
+
+        SyncRun run = runs.latest(tenant.id(), sourceId()).orElseThrow();
+        assertThat(run.status()).isEqualTo(SyncRun.OK);
+        assertThat(run.counts()).isEqualTo(new SyncCounts(0, 0, 2, 0, 0));
+        assertThat(search.count(tenant.id())).isZero();
+        assertThat(search.search(tenant.id(), ANYONE, "okapi", 8).hits()).isEmpty();
+        assertThat(drive.calls).isEqualTo(callsBefore);
+        assertThat(connector.configured()).isFalse();
+    }
+
+    @Test
+    void connectedWithNoFoldersChosenIndexesNothingAndStaysOutOfTheSyncLog() {
+        connection.removeFolder(tenant.id(), FakeDriveClient.MAIN);
+        drive.put("a", "Alpha", "text/plain", T0, "alpha okapi");
+
+        assertThat(connector.configured()).isFalse();
+        scheduler(connector).syncAll();
+        assertThat(jdbc.sql("SELECT count(*) FROM sync_run").query(Long.class).single()).isZero();
+
+        // Even when asked directly, nothing is indexed and Drive is not called.
+        SyncRun run = syncService.run(connector).orElseThrow();
+        assertThat(run.status()).isEqualTo(SyncRun.OK);
+        assertThat(run.counts()).isEqualTo(SyncCounts.NONE);
+        assertThat(search.count(tenant.id())).isZero();
+        assertThat(drive.calls).isZero();
+    }
+
+    @Test
+    void scheduledSyncRunsOnceDriveIsConnectedWithAFolder() {
+        drive.put("a", "Alpha", "text/plain", T0, "alpha okapi");
+        assertThat(connector.configured()).isTrue();
+
+        scheduler(connector).syncAll();
+
+        assertThat(search.count(tenant.id())).isEqualTo(1);
+    }
+
+    @Test
+    void revokedGrantFailsTheRunWithTheReconnectMessageAndDeletesNothing() {
+        drive.put("a", "Alpha", "text/plain", T0, "alpha okapi");
+        drive.put("b", "Beta", "text/plain", T0, "beta okapi");
+        syncService.run(connector);
+
+        drive.revoked = true;
+        SyncRun run = syncService.run(connector).orElseThrow();
+
+        assertThat(run.status()).isEqualTo(SyncRun.FAILED);
+        assertThat(run.error())
+                .isEqualTo("Google access was revoked or expired. Reconnect Google Drive on the Sources page.");
+        assertThat(run.counts()).isEqualTo(SyncCounts.NONE);
+        assertThat(search.count(tenant.id())).isEqualTo(2);
+        assertThat(search.search(tenant.id(), ANYONE, "okapi", 8).hits()).hasSize(2);
+        assertThat(jdbc.sql("SELECT count(*) FROM document WHERE deleted").query(Long.class).single()).isZero();
+
+        ComponentStatus status = connector.status();
+        assertThat(status.state()).isEqualTo(State.DOWN);
+        assertThat(status.detail()).contains("last sync failed").contains("Reconnect Google Drive");
+    }
+
+    @Test
+    void grantRevokedWhileFetchingFilesFailsTheRunInsteadOfCountingEveryFileAsFailed() {
+        drive.put("a", "Alpha", "text/plain", T0, "alpha okapi");
+        syncService.run(connector);
+        // Listing still works; the first download is refused.
+        FakeDriveClient refusing = new FakeDriveClient() {
+            @Override
+            public byte[] fetchContent(long tenantId, DriveFile file) throws java.io.IOException {
+                throw new com.docs0.source.SourceAccessException(GoogleDriveClient.RECONNECT_MESSAGE);
+            }
+        };
+        refusing.put("b", "Beta", "text/plain", T0, "beta okapi");
+
+        SyncRun run = syncService.run(new DriveConnector(refusing, connection, store, runs, tenants)).orElseThrow();
+
+        assertThat(run.status()).isEqualTo(SyncRun.FAILED);
+        assertThat(run.error()).isEqualTo(GoogleDriveClient.RECONNECT_MESSAGE);
+        // "a" is missing from this listing but is not deleted, because the run failed.
+        assertThat(search.search(tenant.id(), ANYONE, "okapi", 8).hits())
+                .extracting(SearchHit::title).containsExactly("Alpha");
+    }
+
+    @Test
+    void disconnectDeletesTheGrantAndHidesTheDocuments() {
+        drive.put("a", "Alpha", "text/plain", T0, "alpha okapi");
+        syncService.run(connector);
+        assertThat(search.count(tenant.id())).isEqualTo(1);
+
+        connection.disconnect(tenant.id());
+
+        assertThat(jdbc.sql("SELECT count(*) FROM source_credential").query(Long.class).single()).isZero();
+        assertThat(connection.credential(tenant.id())).isEmpty();
+        assertThat(search.count(tenant.id())).isZero();
+        assertThat(search.search(tenant.id(), ANYONE, "okapi", 8).hits()).isEmpty();
+        assertThat(connector.configured()).isFalse();
+        assertThat(connector.status().state()).isEqualTo(State.OFF);
+
+        // Connecting again keeps the folder selection; the next sync brings the documents back.
+        connection.connect(tenant.id(), "asha@example.com", "refresh-token-2");
+        assertThat(connection.folders(tenant.id())).containsExactly(new Folder(FakeDriveClient.MAIN, "Main"));
+        assertThat(syncService.run(connector).orElseThrow().counts()).isEqualTo(new SyncCounts(1, 0, 0, 0, 0));
+        assertThat(search.count(tenant.id())).isEqualTo(1);
+    }
+
+    @Test
+    void theGrantIsStoredEncryptedAndReconnectingReplacesIt() {
+        String first = jdbc.sql("SELECT encrypted_refresh_token FROM source_credential").query(String.class).single();
+        assertThat(first).doesNotContain("refresh-token");
+        assertThat(new TokenCipher(DriveTestSetup.ENCRYPTION_KEY).decrypt(first)).isEqualTo("refresh-token");
+
+        connection.connect(tenant.id(), "ben@example.com", "another-token");
+
+        Map<String, Object> row = jdbc.sql("SELECT * FROM source_credential").query().singleRow();
+        assertThat(row.get("account_email")).isEqualTo("ben@example.com");
+        assertThat(row.get("tenant_id")).isEqualTo(tenant.id());
+        assertThat(row.get("source_id")).isEqualTo(sourceId());
+        assertThat((String) row.get("encrypted_refresh_token")).isNotEqualTo(first).doesNotContain("another-token");
+        assertThat(new TokenCipher(DriveTestSetup.ENCRYPTION_KEY)
+                .decrypt((String) row.get("encrypted_refresh_token"))).isEqualTo("another-token");
+        assertThat(connection.credential(tenant.id()).orElseThrow().toString()).doesNotContain(
+                (String) row.get("encrypted_refresh_token"));
+    }
+
+    @Test
+    void chosenFoldersAreKeptInSourceConfigPerTenant() {
+        long other = tenants.ensure("other", "Other Co").id();
+        connection.addFolder(other, new Folder("theirs", "Theirs"));
+        connection.addFolder(tenant.id(), new Folder("f2", "Second \"quoted\" <b>"));
+        connection.addFolder(tenant.id(), new Folder(FakeDriveClient.MAIN, "Main renamed"));
+
+        assertThat(connection.folders(tenant.id()))
+                .containsExactly(new Folder("f2", "Second \"quoted\" <b>"), new Folder(FakeDriveClient.MAIN, "Main renamed"));
+        assertThat(connection.folders(other)).containsExactly(new Folder("theirs", "Theirs"));
+        assertThat(jdbc.sql("SELECT config #>> '{folders,0,id}' FROM source WHERE tenant_id = :t")
+                .param("t", tenant.id()).query(String.class).single()).isEqualTo("f2");
+        assertThat(jdbc.sql("SELECT jsonb_array_length(config -> 'folders') FROM source WHERE tenant_id = :t")
+                .param("t", tenant.id()).query(Integer.class).single()).isEqualTo(2);
+
+        connection.removeFolder(tenant.id(), "f2");
+        connection.removeFolder(tenant.id(), "never-added");
+        assertThat(connection.folders(tenant.id())).containsExactly(new Folder(FakeDriveClient.MAIN, "Main renamed"));
+        assertThat(connection.folders(other)).hasSize(1);
+        assertThat(jdbc.sql("SELECT config::text FROM source WHERE tenant_id = :t")
+                .param("t", tenant.id()).query(String.class).single())
+                .isEqualTo("{\"folders\": [{\"id\": \"main\", \"name\": \"Main renamed\"}]}");
+    }
+
+    @Test
+    void statusIsOffWhenNotConnected() {
+        connection.disconnect(tenant.id());
+
+        assertThat(connector.status()).isEqualTo(unconnected.status());
+        assertThat(connector.status().name()).isEqualTo("Google Drive");
+        assertThat(connector.status().state()).isEqualTo(State.OFF);
+        assertThat(connector.status().detail()).isEqualTo("not connected — connect it on the Sources page");
+        assertThat(connector.configured()).isFalse();
+        assertThat(unconnected.configured()).isFalse();
+    }
+
+    @Test
+    void statusIsOffWhenConnectedButNoFoldersAreChosen() {
+        connection.removeFolder(tenant.id(), FakeDriveClient.MAIN);
+
+        ComponentStatus status = connector.status();
 
         assertThat(status.name()).isEqualTo("Google Drive");
         assertThat(status.state()).isEqualTo(State.OFF);
-        assertThat(status.detail()).isEqualTo("no service account configured");
-        assertThat(unconfigured.configured()).isFalse();
-    }
-
-    @Test
-    void statusIsDownWhenTheCredentialsFileIsMissing() {
-        ComponentStatus status = connector(tmp.resolve("nope.json").toString(), "").status();
-
-        assertThat(status.name()).isEqualTo("Google Drive");
-        assertThat(status.state()).isEqualTo(State.DOWN);
-        assertThat(status.detail()).contains("credentials file");
+        assertThat(status.detail()).isEqualTo("connected as asha@example.com, no folders chosen yet");
     }
 
     @Test
     void statusIsUpBeforeAndAfterASuccessfulSyncWithoutCallingDrive() {
         assertThat(connector.status().state()).isEqualTo(State.UP);
-        assertThat(connector.status().detail()).isEqualTo("waiting for first sync");
+        assertThat(connector.status().detail()).isEqualTo("connected as asha@example.com, waiting for first sync");
 
         drive.put("a", "Alpha", "text/plain", T0, "alpha");
         drive.put("b", "Beta", "text/plain", T0, "beta");
         syncService.run(connector);
-        drive.fetched.clear();
-        drive.lastFolderIds = null;
+        int callsBefore = drive.calls;
 
         ComponentStatus status = connector.status();
 
         assertThat(status.state()).isEqualTo(State.UP);
         assertThat(status.detail()).startsWith("2 documents, last sync ");
-        assertThat(drive.fetched).isEmpty();
-        assertThat(drive.lastFolderIds).isNull();
+        assertThat(drive.calls).isEqualTo(callsBefore);
     }
 
-    private DriveConnector connector(String credentialsFile, String folderIds) {
-        Docs0Properties props = new Docs0Properties(null, null, null, null,
-                new Docs0Properties.Drive(credentialsFile, folderIds, 15, false));
-        return new DriveConnector(props, drive, store, sources, runs, tenants);
+    @Test
+    void statusIsDownWhenTheEncryptionKeyHasGoneMissing() {
+        DriveConnection keyless = new DriveConnection(DriveTestSetup.props(), new TokenCipher(""), sources,
+                credentials, store);
+
+        ComponentStatus status = new DriveConnector(drive, keyless, store, runs, tenants).status();
+
+        assertThat(status.state()).isEqualTo(State.DOWN);
+        assertThat(status.detail()).contains("DOCS0_ENCRYPTION_KEY");
+    }
+
+    private SyncScheduler scheduler(DriveConnector driveConnector) {
+        return new SyncScheduler(syncService, List.<com.docs0.source.SourceConnector>of(driveConnector), DriveTestSetup.props());
     }
 
     private long sourceId() {

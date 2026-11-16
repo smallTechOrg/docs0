@@ -1,13 +1,23 @@
 package com.docs0.config;
 
 import java.math.BigDecimal;
-import java.util.Arrays;
-import java.util.List;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 /** All docs0 settings, bound from DOCS0_* environment variables via application.yml. */
 @ConfigurationProperties(prefix = "docs0")
-public record Docs0Properties(Tenant tenant, Anthropic anthropic, Budget budget, Slack slack, Drive drive) {
+public record Docs0Properties(
+        Tenant tenant,
+        Anthropic anthropic,
+        Budget budget,
+        Slack slack,
+        Drive drive,
+        Google google,
+        /** Base64 of 32 random bytes; encrypts stored Google grants. */
+        String encryptionKey,
+        /** Where a browser reaches this app, e.g. http://localhost:8080. */
+        String publicUrl,
+        /** Password for /admin pages (user "admin"). Empty: /admin is served to the local machine only. */
+        String adminPassword) {
 
     public record Tenant(String slug, String name) {}
 
@@ -38,19 +48,27 @@ public record Docs0Properties(Tenant tenant, Anthropic anthropic, Budget budget,
         }
     }
 
-    public record Drive(String credentialsFile, String folderIds, int syncIntervalMinutes, boolean syncOnStartup) {
+    public record Drive(int syncIntervalMinutes, boolean syncOnStartup) {}
+
+    /** The OAuth client an admin signs in through to connect Google Drive. */
+    public record Google(String oauthClientId, String oauthClientSecret) {
 
         public boolean configured() {
-            return hasText(credentialsFile);
+            return hasText(oauthClientId) && hasText(oauthClientSecret);
         }
+    }
 
-        /** Folder ids to restrict the sync to; empty means everything the service account can see. */
-        public List<String> folderIdList() {
-            if (!hasText(folderIds)) {
-                return List.of();
-            }
-            return Arrays.stream(folderIds.split(",")).map(String::trim).filter(s -> !s.isEmpty()).toList();
+    /** The redirect URI to register on the Google OAuth client. */
+    public String googleRedirectUri() {
+        String base = publicUrl == null ? "" : publicUrl.trim();
+        while (base.endsWith("/")) {
+            base = base.substring(0, base.length() - 1);
         }
+        return base + "/admin/sources/google/callback";
+    }
+
+    public boolean adminPasswordSet() {
+        return hasText(adminPassword);
     }
 
     private static boolean hasText(String s) {

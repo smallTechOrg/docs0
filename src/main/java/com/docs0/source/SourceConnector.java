@@ -12,12 +12,13 @@ public interface SourceConnector {
     /** SHARED or RESTRICTED. */
     String visibility();
 
-    /** False when the credentials for this source are not set; it is then never synced on a schedule. */
+    /** False when there is nothing to sync (not connected, nothing chosen); it is then skipped on the schedule. */
     boolean configured();
 
     /**
      * Brings the tenant's documents of this source up to date. One bad item must be counted
-     * as failed, not thrown; throw only when the run as a whole cannot proceed.
+     * as failed, not thrown; throw only when the run as a whole cannot proceed. Throw
+     * {@link SourceAccessException} when an admin has to act; its message is shown as is.
      */
     SyncCounts sync(long tenantId, long sourceId) throws Exception;
 }

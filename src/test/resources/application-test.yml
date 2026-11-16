@@ -19,6 +19,10 @@ docs0:
     bot-token: ""
     app-token: ""
   drive:
-    credentials-file: ""
-    folder-ids: ""
     sync-on-startup: false
+  google:
+    oauth-client-id: ""
+    oauth-client-secret: ""
+  encryption-key: ""
+  public-url: http://localhost:8080
+  admin-password: ""

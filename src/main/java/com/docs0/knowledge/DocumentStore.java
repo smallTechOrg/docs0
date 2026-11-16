@@ -105,6 +105,17 @@ public class DocumentStore {
         return removed;
     }
 
+    /** Marks every document of the source deleted. Returns how many changed. */
+    public int markAllDeleted(long tenantId, long sourceId) {
+        return jdbc.sql("""
+                        UPDATE document SET deleted = TRUE, synced_at = now()
+                        WHERE tenant_id = :tenant AND source_id = :source AND NOT deleted
+                        """)
+                .param("tenant", tenantId)
+                .param("source", sourceId)
+                .update();
+    }
+
     /** Live documents of one source. */
     public long count(long tenantId, long sourceId) {
         return jdbc.sql("""

@@ -39,6 +39,11 @@ public final class DriveText {
                 || PLAIN_TEXT.contains(mimeType));
     }
 
+    /** True for a file docs0 indexes: a supported type that is not over the size limit. */
+    public static boolean indexable(String mimeType, Long size) {
+        return supported(mimeType) && (size == null || size <= MAX_BYTES);
+    }
+
     /** The export format for a Google-native type; empty for files that are downloaded as stored. */
     public static Optional<String> exportMimeType(String mimeType) {
         return Optional.ofNullable(EXPORTS.get(mimeType));

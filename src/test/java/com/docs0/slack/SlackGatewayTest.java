@@ -22,7 +22,7 @@ class SlackGatewayTest {
                 new Docs0Properties.Anthropic("", "test-model", new BigDecimal("2"), new BigDecimal("10"), 12),
                 new Docs0Properties.Budget(new BigDecimal("100")),
                 new Docs0Properties.Slack(botToken, appToken),
-                new Docs0Properties.Drive("", "", 15, false));
+                new Docs0Properties.Drive(15, false), null, "", "", "");
     }
 
     private static MessageEvent message(String channel, String channelType, String ts, String threadTs) {

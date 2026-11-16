@@ -12,7 +12,7 @@ import org.springframework.stereotype.Component;
 
 /**
  * When sources are synced: once after startup, then on a fixed interval. Connectors that
- * are not configured are left alone, so with no credentials this does nothing.
+ * have nothing to sync are left alone, so until Drive is connected this does nothing.
  */
 @Component
 public class SyncScheduler {

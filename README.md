@@ -17,7 +17,8 @@ Gmail follow, one phase at a time. See [spec/roadmap.md](spec/roadmap.md).
   (`createdb docs0`; tests use `docs0_test`)
 - An Anthropic API key
 - A Slack workspace where you can create an app
-- A Google Cloud service account that can read the Drive folders you want indexed
+- A Google account that can open the Drive folders you want indexed, and a Google Cloud
+  project where you can create an OAuth client
 
 ## Setup
 
@@ -43,18 +44,39 @@ docs0 connects out to Slack over Socket Mode, so it needs no public URL.
 
 ### 3. Google Drive
 
-1. In Google Cloud Console, create a project, enable the **Google Drive API**, and create
-   a **service account**. Create a JSON key for it and save the file outside the repo (or
-   under `secrets/`, which is git-ignored).
-2. Set `DOCS0_GOOGLE_CREDENTIALS_FILE` to the absolute path of that file.
-3. Share the Drive folders or shared drives you want indexed with the service account's
-   email address, as **Viewer**.
-4. Optional: set `DOCS0_DRIVE_FOLDER_IDS` to a comma-separated list of folder ids to
-   limit indexing to those folders. Left empty, docs0 indexes everything shared with the
-   service account.
+You connect Drive by signing in with Google on docs0's Sources page. That needs a Google
+OAuth client, created once:
+
+1. In [Google Cloud Console](https://console.cloud.google.com), create or pick a project.
+   Under **APIs & Services → Library**, enable the **Google Drive API**.
+2. Under **APIs & Services → OAuth consent screen**, set the app up with user type
+   **Internal** (for a Google Workspace organisation, this limits sign-in to your own
+   people and needs no review by Google).
+3. Under **APIs & Services → Credentials → Create credentials → OAuth client ID**, choose
+   **Web application** and add this **Authorized redirect URI**:
+   `http://localhost:8080/admin/sources/google/callback`
+4. Put three values in `.env`:
+   - `DOCS0_GOOGLE_OAUTH_CLIENT_ID` — the client ID
+   - `DOCS0_GOOGLE_OAUTH_CLIENT_SECRET` — the client secret
+   - `DOCS0_ENCRYPTION_KEY` — a key of your own, made with `openssl rand -base64 32`.
+     docs0 encrypts the stored Google sign-in with it.
+5. Start docs0 (see [Run](#run)) and open <http://localhost:8080/admin/sources>. Click
+   **Connect Google Drive** and sign in. Pick the folders to index from My Drive, Shared
+   with me or your shared drives, then click **Sync now**.
+
+docs0 gets read-only access and indexes only the folders you pick, including everything
+inside them. Nothing is indexed until you pick a folder. You can change the folders,
+reconnect or disconnect on the same page at any time.
 
 Indexed types: Google Docs, Sheets and Slides, PDFs, and plain text, Markdown and CSV
 files. docs0 syncs at startup and every 15 minutes.
+
+The Sources page is an admin page. Out of the box it opens only in a browser on the
+machine docs0 runs on. To reach it from elsewhere, set `DOCS0_ADMIN_PASSWORD` and sign in
+as user `admin`; set it too whenever docs0 sits behind a proxy. If docs0 is not at
+`http://localhost:8080`, set `DOCS0_PUBLIC_URL` to its address, register
+`<DOCS0_PUBLIC_URL>/admin/sources/google/callback` as the redirect URI, and open the
+Sources page at that same address.
 
 ## Run
 
@@ -63,8 +85,8 @@ files. docs0 syncs at startup and every 15 minutes.
 ```
 
 Open <http://localhost:8080> for the status page: connection state for Slack, Anthropic
-and Drive, the document count, the last sync and this month's spend. `/health` returns
-the same as JSON. The app starts even when a credential is missing; the status page says
+and Drive, the document count, the last sync and this month's spend, with a link to the
+Sources page. `/health` returns the same as JSON. The app starts even when a credential is missing; the status page says
 what is not set up.
 
 ## Use

@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <meta http-equiv="refresh" content="4" th:if="${syncRunning}">
+  <title>docs0 sources</title>
+  <style>
+    :root { --bg:#f7f7f5; --card:#fff; --text:#1c1c1a; --muted:#6b6b66; --line:#e4e4df;
+            --up:#1a7f4b; --off:#8a6d00; --down:#b3261e; }
+    @media (prefers-color-scheme: dark) {
+      :root { --bg:#151514; --card:#1f1f1d; --text:#ecece8; --muted:#a0a09a; --line:#33332f;
+              --up:#5fd08f; --off:#e0be4a; --down:#ff8a80; }
+    }
+    * { box-sizing: border-box; }
+    body { margin:0; background:var(--bg); color:var(--text);
+           font:15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    main { max-width:760px; margin:0 auto; padding:32px 16px 48px; }
+    h1 { font-size:22px; margin:0 0 4px; }
+    h2 { font-size:13px; text-transform:uppercase; letter-spacing:.06em; color:var(--muted); margin:28px 0 8px; }
+    h3 { font-size:14px; margin:0; padding:12px 16px 0; }
+    a { color:inherit; }
+    p { margin:0 0 10px; }
+    code { font:13px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; overflow-wrap:anywhere; }
+    .sub { color:var(--muted); margin:0; }
+    .card { background:var(--card); border:1px solid var(--line); border-radius:10px; }
+    .pad { padding:14px 16px; }
+    .pad > :last-child { margin-bottom:0; }
+    .row { display:flex; flex-wrap:wrap; gap:8px 12px; align-items:center; padding:12px 16px;
+           border-top:1px solid var(--line); }
+    .row:first-child { border-top:0; }
+    .name { flex:1 1 180px; font-weight:600; overflow-wrap:anywhere; min-width:0; }
+    .detail { flex:1 1 180px; color:var(--muted); overflow-wrap:anywhere; min-width:0; }
+    .state { font-weight:600; font-size:13px; }
+    .UP { color:var(--up); } .OFF { color:var(--off); } .DOWN { color:var(--down); }
+    .actions { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
+    form { margin:0; }
+    button, .button { font:inherit; font-weight:600; font-size:14px; padding:7px 14px; border-radius:8px;
+                      border:1px solid var(--line); background:var(--card); color:var(--text); cursor:pointer;
+                      text-decoration:none; display:inline-block; }
+    .primary { background:var(--text); color:var(--bg); border-color:var(--text); }
+    .danger { color:var(--down); }
+    .msg { padding:12px 16px; margin-top:16px; border-left-width:4px; }
+    .msg.notice { border-left-color:var(--up); }
+    .msg.error { border-left-color:var(--down); }
+    .crumbs { padding:12px 16px; border-bottom:1px solid var(--line); color:var(--muted); overflow-wrap:anywhere; }
+    .empty { padding:12px 16px; color:var(--muted); }
+    ol, ul { margin:0 0 10px; padding-left:20px; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Sources</h1>
+  <p class="sub">Where docs0 reads <span th:text="${tenantName}">tenant</span>'s documents from ·
+    <a href="/">Back to status</a></p>
+
+  <div class="card msg notice" th:if="${notice != null}" th:text="${notice}">notice</div>
+  <div class="card msg error" th:if="${error != null}" th:text="${error}">error</div>
+
+  <h2>Google Drive</h2>
+
+  <!-- Setup incomplete -->
+  <div class="card pad" th:if="${state == 'setup'}" id="setup-incomplete">
+    <p><b>Google Drive needs a one-time setup before it can be connected.</b></p>
+    <p>Add these to the <code>.env</code> file and restart docs0:</p>
+    <ul>
+      <li th:each="m : ${missing}"><code th:text="${m}">DOCS0_SETTING</code>
+        <span class="sub" th:if="${m == 'DOCS0_GOOGLE_OAUTH_CLIENT_ID'}">— the client ID of a Google OAuth client</span>
+        <span class="sub" th:if="${m == 'DOCS0_GOOGLE_OAUTH_CLIENT_SECRET'}">— that client's secret</span>
+        <span class="sub" th:if="${m == 'DOCS0_ENCRYPTION_KEY'}">— 32 random bytes in base64; make one with
+          <code>openssl rand -base64 32</code></span>
+      </li>
+    </ul>
+    <p>Create the OAuth client in Google Cloud Console (type <i>Web application</i>) and register this
+      redirect URI on it:</p>
+    <p><code th:text="${redirectUri}">http://localhost:8080/admin/sources/google/callback</code></p>
+    <p class="sub">The README has the steps.</p>
+  </div>
+
+  <!-- Not connected -->
+  <div class="card pad" th:if="${state == 'disconnected'}" id="not-connected">
+    <p><b>Google Drive is not connected.</b></p>
+    <p>Sign in with the Google account whose folders docs0 should read. docs0 gets read-only access and
+      indexes only the folders you choose afterwards.</p>
+    <p><a class="button primary" href="/admin/sources/google/connect">Connect Google Drive</a></p>
+  </div>
+
+  <!-- Connected -->
+  <th:block th:if="${state == 'connected'}">
+    <div class="card" id="connected">
+      <div class="row">
+        <div class="detail">Connected as <b th:text="${accountEmail}">admin@example.com</b> ·
+          <span th:text="${documents}">0</span> documents indexed</div>
+        <div class="actions" th:if="${!confirmDisconnect}">
+          <a class="button" href="/admin/sources/google/connect">Reconnect</a>
+          <a class="button danger" href="/admin/sources?disconnect=ask">Disconnect</a>
+        </div>
+      </div>
+      <div class="row" th:if="${confirmDisconnect}" id="confirm-disconnect">
+        <div class="detail"><b>Disconnect Google Drive?</b> docs0 forgets the sign-in and stops using its
+          documents in answers. You can connect again later.</div>
+        <div class="actions">
+          <form method="post" action="/admin/sources/disconnect">
+            <input type="hidden" name="_csrf" th:value="${csrf}">
+            <button class="danger" type="submit">Yes, disconnect</button>
+          </form>
+          <a class="button" href="/admin/sources">Cancel</a>
+        </div>
+      </div>
+    </div>
+
+    <div class="card msg error" th:if="${driveError != null}" id="drive-error" th:text="${driveError}">error</div>
+
+    <h2>Folders being indexed</h2>
+    <div class="card" id="selection">
+      <div class="empty" th:if="${selected.isEmpty()}">No folders chosen yet. Nothing is indexed until you add
+        one below.</div>
+      <div class="row" th:each="s : ${selected}">
+        <div class="name" th:text="${s.folder.name}">Folder</div>
+        <div class="detail" th:text="${s.files != null ? s.files + ' docs0 can read' : 'not checked'}">12 files</div>
+        <form method="post" action="/admin/sources/folders/remove">
+          <input type="hidden" name="_csrf" th:value="${csrf}">
+          <input type="hidden" name="id" th:value="${s.folder.id}">
+          <input type="hidden" name="back" th:value="${here}">
+          <button type="submit">Remove</button>
+        </form>
+      </div>
+    </div>
+    <p class="sub" style="margin-top:8px">Everything inside a chosen folder is included, sub-folders too.</p>
+
+    <h2>Sync</h2>
+    <div class="card" id="sync">
+      <div class="row">
+        <div class="detail" th:if="${syncRunning}"><b class="OFF">Sync running…</b> This page refreshes by itself.</div>
+        <div class="detail" th:if="${!syncRunning}">docs0 syncs by itself every few minutes. Sync now to pick up
+          changes straight away.</div>
+        <form method="post" action="/admin/sources/sync" th:if="${!syncRunning}">
+          <input type="hidden" name="_csrf" th:value="${csrf}">
+          <input type="hidden" name="back" th:value="${here}">
+          <button class="primary" type="submit">Sync now</button>
+        </form>
+      </div>
+      <div class="row" th:each="r : ${runs}">
+        <div class="detail">
+          <span th:text="${r.started}">time</span>
+          · <span th:text="${r.run.counts.added}">0</span> added
+          · <span th:text="${r.run.counts.updated}">0</span> updated
+          · <span th:text="${r.run.counts.removed}">0</span> removed
+          · <span th:text="${r.run.counts.skipped}">0</span> skipped
+          · <span th:text="${r.run.counts.failed}">0</span> failed
+          <span th:if="${r.run.error != null}" class="DOWN" th:text="${' · ' + r.run.error}"></span>
+        </div>
+        <div class="state" th:classappend="${r.state}" th:text="${r.label}">Complete</div>
+      </div>
+      <div class="empty" th:if="${runs.isEmpty()}">No sync has run yet.</div>
+    </div>
+
+    <th:block th:if="${driveError == null}">
+      <h2>Add folders</h2>
+
+      <div class="card" style="margin-bottom:12px" th:each="section : ${sections}" th:id="${section.id}">
+        <h3 th:if="${atTop}" th:text="${section.title}">My Drive</h3>
+        <div class="crumbs" th:if="${!atTop}">
+          <th:block th:each="c, at : ${crumbs}">
+            <a th:if="${!at.last}" th:href="${c.url}" th:text="${c.name}">Folder</a>
+            <b th:if="${at.last}" th:text="${c.name}">Folder</b>
+            <span th:if="${!at.last}"> / </span>
+          </th:block>
+        </div>
+        <div class="empty" th:if="${section.folders.isEmpty()}" th:text="${section.emptyText}">No folders here.</div>
+        <div class="row" th:each="f : ${section.folders}">
+          <div class="name" th:text="${f.folder.name}">Folder</div>
+          <div class="actions">
+            <a class="button" th:href="${f.openUrl}">Open</a>
+            <span class="state UP" th:if="${f.selected}">Added</span>
+            <form method="post" action="/admin/sources/folders/add" th:if="${!f.selected}">
+              <input type="hidden" name="_csrf" th:value="${csrf}">
+              <input type="hidden" name="id" th:value="${f.folder.id}">
+              <input type="hidden" name="name" th:value="${f.folder.name}">
+              <input type="hidden" name="back" th:value="${here}">
+              <button type="submit">Add</button>
+            </form>
+          </div>
+        </div>
+      </div>
+    </th:block>
+  </th:block>
+</main>
+</body>
+</html>
