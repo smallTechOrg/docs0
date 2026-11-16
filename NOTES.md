@@ -23,3 +23,16 @@ Run started: 2026-11-17 01:24 IST.
 - **User pasted the API key in chat mid-build.** → Wrote it to the git-ignored `.env`,
   validated with one call printing only the HTTP status. Lesson: intake should tell the
   user up front to put keys in `.env` rather than in chat.
+- **Worktree-isolated workers started from the repo's initial commit, not the build
+  branch.** All three reported their worktree was at the first commit with no spec or
+  scaffold. → Each fast-forwarded to the pushed scaffold commit named in their brief's
+  context and carried on; merges back were clean. Lesson: put the exact base commit in
+  every worker brief and tell it to fast-forward first.
+- **Slices could not load the full Spring context alone.** Each slice consumed a bean
+  another slice was writing. → Fixed contracts in the scaffold, a context-free
+  `TestDatabase` helper, a per-worker test database, and gates scoped to the slice's
+  packages; the root ran the full suite after each merge. Lesson: decide the test
+  isolation story before fanning out.
+- **`-q` hides Maven's test summary.** Exit code alone is thin evidence. → Counted tests
+  from `target/surefire-reports/*.xml` after every gate. Lesson: the gate command should
+  print counts.
