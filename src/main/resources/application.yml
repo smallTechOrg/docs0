@@ -1,0 +1,41 @@
+spring:
+  application:
+    name: docs0
+  config:
+    # Local secrets. Optional: the app boots without it.
+    import: "optional:file:.env[.properties]"
+  datasource:
+    url: ${DOCS0_DATABASE_URL:jdbc:postgresql://localhost:5432/docs0}
+    username: ${DOCS0_DATABASE_USER:${user.name}}
+    password: ${DOCS0_DATABASE_PASSWORD:}
+  flyway:
+    enabled: true
+  threads:
+    virtual:
+      enabled: true
+
+server:
+  port: ${DOCS0_PORT:8080}
+
+docs0:
+  tenant:
+    slug: ${DOCS0_TENANT_SLUG:smalltech}
+    name: ${DOCS0_TENANT_NAME:smallTech}
+  anthropic:
+    api-key: ${DOCS0_ANTHROPIC_API_KEY:}
+    model: ${DOCS0_ANTHROPIC_MODEL:claude-sonnet-5-5}
+    # USD per million tokens, used to compute cost per answer.
+    input-price-per-mtok: ${DOCS0_ANTHROPIC_INPUT_PRICE:2.00}
+    output-price-per-mtok: ${DOCS0_ANTHROPIC_OUTPUT_PRICE:10.00}
+    max-steps: ${DOCS0_AGENT_MAX_STEPS:12}
+  budget:
+    # Hard monthly spend cap per tenant, in USD. 0 disables the cap.
+    monthly-usd: ${DOCS0_MONTHLY_BUDGET_USD:100}
+  slack:
+    bot-token: ${DOCS0_SLACK_BOT_TOKEN:}
+    app-token: ${DOCS0_SLACK_APP_TOKEN:}
+  drive:
+    credentials-file: ${DOCS0_GOOGLE_CREDENTIALS_FILE:}
+    folder-ids: ${DOCS0_DRIVE_FOLDER_IDS:}
+    sync-interval-minutes: ${DOCS0_DRIVE_SYNC_INTERVAL_MINUTES:15}
+    sync-on-startup: ${DOCS0_DRIVE_SYNC_ON_STARTUP:true}

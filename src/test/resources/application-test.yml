@@ -1,0 +1,24 @@
+# Tests never use real credentials: every integration is forced off here,
+# overriding anything a local .env would supply.
+spring:
+  datasource:
+    url: ${DOCS0_TEST_DATABASE_URL:jdbc:postgresql://localhost:5432/docs0_test}
+  flyway:
+    clean-disabled: false
+
+docs0:
+  anthropic:
+    api-key: ""
+    model: claude-sonnet-5-5
+    input-price-per-mtok: 2.00
+    output-price-per-mtok: 10.00
+    max-steps: 12
+  budget:
+    monthly-usd: 100
+  slack:
+    bot-token: ""
+    app-token: ""
+  drive:
+    credentials-file: ""
+    folder-ids: ""
+    sync-on-startup: false
