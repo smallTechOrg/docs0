@@ -73,7 +73,7 @@ class SlackGatewayTest {
                     com.docs0.conversation.InteractionRepository.class,
                     com.docs0.feedback.FeedbackRepository.class, com.docs0.feedback.CorrectionRepository.class,
                     CorrectionDetector.class, CorrectionFlow.class, ReactionHandler.class,
-                    BoltSlackMessenger.class, QuestionHandler.class, SlackGateway.class);
+                    BoltSlackMessenger.class, IdentityService.class, QuestionHandler.class, SlackGateway.class);
             context.refresh();
 
             assertThat(context.getBean(SlackMessenger.class)).isInstanceOf(BoltSlackMessenger.class);
@@ -186,7 +186,7 @@ class SlackGatewayTest {
                 .containsEntry("messages_tab_read_only_enabled", false);
         assertThat((List<String>) scopes.get("bot")).containsExactlyInAnyOrder("app_mentions:read", "chat:write",
                 "channels:history", "groups:history", "im:history", "mpim:history", "channels:read", "groups:read",
-                "im:read", "mpim:read", "users:read", "reactions:read");
+                "im:read", "mpim:read", "users:read", "users:read.email", "channels:join", "reactions:read");
         assertThat((List<String>) events.get("bot_events")).containsExactlyInAnyOrder("app_mention",
                 "message.channels", "message.groups", "message.im", "message.mpim", "reaction_added", "reaction_removed");
         assertThat(settings).containsEntry("socket_mode_enabled", true);

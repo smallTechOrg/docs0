@@ -120,6 +120,44 @@ counts, and one document per open card (list, labels, members, due date, descrip
 checklists with ✓ and ☐ items, and comments). docs0 stays under Trello's rate limit and backs
 off when Trello asks it to.
 
+### Slack history and private channels
+
+docs0 can also learn from what your team says in Slack, so it can answer "what did we decide
+about X?" from a channel discussion. Open **Sources → Slack history**, tick the channels to
+include and press **Save**, then **Sync now**. Nothing is indexed until you tick at least one.
+
+**What is indexed.** Only the channels you tick: one document per thread, and one document per
+channel per day for messages that are not in a thread, for the last `DOCS0_SLACK_HISTORY_DAYS`
+days (default 180). Joins, leaves, topic changes and docs0's own messages are left out. Edited
+messages are re-read and deleted messages disappear at the next sync. A channel you untick (or
+that docs0 can no longer see) has its documents removed at the next sync.
+
+**What is never indexed.** Direct messages and group direct messages. docs0 does not read them
+at all: it only ever asks Slack for the channels you ticked.
+
+**How private channels are protected.** Public channels are shared knowledge. A private channel
+can be ticked once docs0 has been invited to it (`/invite @docs0` in that channel), and its
+messages are then **restricted**: docs0 only uses them in an answer when *everyone who will see
+that answer* is a member of that private channel. In a channel, that is every member of the
+channel docs0 is answering in; in a direct message it is the one person. If even one person is
+outside the private channel, the messages are invisible to the answer: not quoted, not cited,
+not even hinted at. Bots and deactivated users are not counted as people. Membership is
+re-read on every sync, so someone who leaves a private channel stops being covered at the next
+sync. If docs0 cannot tell who is in the channel it hides that channel's documents until it can.
+
+**One-time step for the new permissions.** Slack history needs two new bot scopes,
+`users:read.email` (to match people by email as well as by Slack id) and `channels:join` (to
+join public channels you tick). If you created the app earlier:
+
+1. Open your app at <https://api.slack.com/apps> → **App Manifest**, paste the current
+   [slack/manifest.yml](slack/manifest.yml) and save.
+2. **Reinstall the app** (*Install App → Reinstall to Workspace*). The bot token stays the same.
+
+Until then Slack history still works for public channels and matches people by Slack id; the
+Sources page shows a note that emails cannot be read. For each private channel, run
+`/invite @docs0` in it; the Sources page shows "invite @docs0 to #name" while docs0 is not in
+it.
+
 ### Creating issues and cards
 
 docs0 reads from Linear and Trello and never edits or deletes anything there. The one thing
@@ -164,6 +202,9 @@ what is not set up.
 - Approved corrections outrank documents. When one shapes an answer, docs0 says so, for
   example "per Arjun's correction on 2 Nov". A correction made in a DM is credited to
   "a teammate", never by name.
+
+- Ask what people said: Slack threads in the channels you chose are searched together with the
+  documents. A private channel's messages only appear in answers shown to people who are all in it.
 
 - Ask about work in progress too: "what is the status of ENG-12?", "what is on the roadmap
   board?". Linear issues and Trello cards are searched together with the documents.

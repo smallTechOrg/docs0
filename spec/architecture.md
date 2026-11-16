@@ -35,6 +35,7 @@ src/main/java/com/docs0/
   source/                       SourceConnector SPI, SyncService, SyncRun log
   source/drive/                 DriveClient, DriveConnector, text extraction
   source/linear/, source/trello/  LinearClient/TrelloClient (network edge), connection, connector, rendering
+  source/slack/                 Slack history connector (channel selection, rendering, sync)
   action/                       PendingAction, drafts repository, ActionService (the only writes)
   budget/                       BudgetService: hard monthly spend cap
   agent/                        AgentService (tool loop), tools, AnswerVerifier, LlmClient
@@ -116,14 +117,39 @@ Phase 3 adds:
   confirm. `DONE` is set when the confirm click claims the draft, just before the item is
   created; `result_url` is filled when it exists, and a failed create becomes `FAILED`.
 
-Later phases add `principal`/ACL tables and channel settings.
+Phase 4a adds (migration `V5__access_control.sql`):
 
-## Access model (design, enforced from Phase 4)
+- `document.restricted boolean not null default false` — existing documents stay unrestricted.
+- `document_principal(tenant_id, document_id, principal text, PRIMARY KEY (document_id, principal))`,
+  deleted with its document, index on `(tenant_id, principal)`. A principal is a lowercase string:
+  a Slack user id (`u…`) or an email.
+- `identity(tenant_id, slack_user_id, email, display_name, is_bot, deleted, updated_at)`, unique on
+  `(tenant_id, slack_user_id)` — a cache of Slack users, refreshed when older than 24 hours. `email`
+  is null when the app lacks the `users:read.email` scope. (`deleted` marks deactivated users.)
+- `source.kind` value `SLACK` (name `Slack history`, config `{"channels":[{"id","name","private"}]}`).
 
-Each document belongs to a source. A `SHARED` source is visible to everyone in the
-tenant. A `RESTRICTED` source carries a set of principals per document (Slack user ids
-for private channels, the mailbox owner for Gmail). When answering, the agent's search
-and read tools receive the conversation **audience**: all members of the channel, or the
-one person in a DM. A restricted document is eligible only if every audience member is in
-its principal set. Phase 1 has only `SHARED` sources, so the audience filter is a no-op,
-but the tool signatures already carry it.
+Later phases add per-mailbox principals (Gmail) and channel settings.
+
+## Access model (implemented in Phase 4a)
+
+A document is either **shared** (`restricted = false`, the default: Drive, Linear, Trello, public
+Slack channels) or **restricted** (`restricted = true`), in which case `document_principal` holds who
+may see it: for a private Slack channel, the channel's current members (Slack ids, plus their emails
+when known); later, the mailbox owner for Gmail. Writes replace the principal set (`DocumentStore.
+upsertRestricted`) and `refreshAccess` brings unchanged documents up to date, so a membership change
+lands at the next sync.
+
+When answering, the conversation **audience** is every member of the channel docs0 answers in, or the
+one person in a DM. It is built by the Slack layer from `conversations.members`, resolved through the
+`identity` cache to `(slackUserId, email?)` pairs; bots, deactivated users and docs0 itself are dropped;
+a person Slack cannot describe stays in by id only; if the member list cannot be read the asker alone
+is the audience. DMs and group DMs are never indexed.
+
+**Eligibility rule.** A restricted document is eligible only if the audience has at least one member
+and every member is covered, where a member is covered when their lowercase Slack id or lowercase email
+is one of the document's principals. An empty audience sees no restricted documents. The rule is one
+SQL predicate (`JdbcKnowledgeSearch.ELIGIBLE`) used by `search` (including the any-term retry and the
+source-kind filter), `findById` and `recent`; a hidden document leaves no hit, snippet, title or
+existence signal, and `findById` of a hidden id is empty exactly like a missing id. `count` stays
+tenant-wide. `AgentService`, `KnowledgeTools` and `AnswerVerifier` pass the request's audience to every
+call, so the verifier cannot confirm a quote from a document the audience cannot see.

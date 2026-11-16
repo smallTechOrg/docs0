@@ -61,7 +61,8 @@ class QuestionHandlerTest {
                 new Docs0Properties.Drive(15, false), null, "", "", "");
         return new QuestionHandler(new TenantService(jdbc, props), agent, knowledge, new BudgetService(jdbc, props),
                 new ConversationRepository(jdbc), new InteractionRepository(jdbc), slack, correctionFlow(props),
-                new com.docs0.action.PendingActionRepository(jdbc), statusInterval);
+                new com.docs0.action.PendingActionRepository(jdbc), new IdentityService(jdbc, slack),
+                statusInterval);
     }
 
     private CorrectionFlow correctionFlow(Docs0Properties props) {

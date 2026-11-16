@@ -29,6 +29,8 @@ oauth_config:
       - im:read
       - mpim:read
       - users:read
+      - users:read.email
+      - channels:join
       - reactions:read
 settings:
   event_subscriptions:

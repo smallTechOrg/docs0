@@ -37,6 +37,9 @@ docs0:
   drive:
     sync-interval-minutes: ${DOCS0_DRIVE_SYNC_INTERVAL_MINUTES:15}
     sync-on-startup: ${DOCS0_DRIVE_SYNC_ON_STARTUP:true}
+  slack-history:
+    # How many days of channel history the Slack history source indexes.
+    days: ${DOCS0_SLACK_HISTORY_DAYS:180}
   google:
     # OAuth client an admin signs in through on the Sources page.
     oauth-client-id: ${DOCS0_GOOGLE_OAUTH_CLIENT_ID:}

@@ -158,9 +158,26 @@ Slack thread, only after the asker confirms. It never edits or deletes anything 
 
 ## C8. Grain and Slack history (Phase 4)
 
-Grain notes and transcripts as shared knowledge. Slack public channels as shared
-knowledge; private channels as restricted knowledge visible only when every audience
-member is in that channel. Introduces the audience filter.
+Grain notes and transcripts as shared knowledge (Phase 4b). Slack public channels as shared
+knowledge; private channels as restricted knowledge visible only when every audience member
+is in that channel. Introduces the audience filter (Phase 4a, built).
+
+**Slack history (built).** Source `Slack history` (kind `SLACK`), using the bot token already in
+settings. The admin ticks channels on the Sources page; nothing is indexed until one is chosen.
+A public channel is joined if needed (`conversations.join`); a private channel must already have
+had docs0 invited, otherwise the page says "invite @docs0 to #name" and the run counts it skipped.
+Per channel, the last `docs0.slack-history.days` days (default 180) become one document per thread
+(`thread:<channel>:<root_ts>`, root plus replies) and one per channel per UTC day for messages
+outside threads (`day:<channel>:<yyyy-mm-dd>`), as lines like `[2026-11-02 10:15] Priya: text` with
+mentions resolved to names, links as `text (url)` and entities decoded. Joins/leaves and other
+non-conversation messages and docs0's own messages are skipped; file titles are included as text; the
+current content is re-rendered each time, so deleted messages disappear. The first run of each UTC day
+reads the whole window; the runs in between read from the last clean run minus a day and re-read
+threads whose latest activity is newer than the stored document. Slack rate limits (HTTP 429) are
+waited out as `Retry-After` says, a bounded number of times. Public-channel documents are shared;
+private-channel documents are restricted to the channel's current members. A de-selected, archived or
+inaccessible channel has its documents removed at the next sync. One failing channel or thread is
+counted and never aborts the run. DMs and group DMs are never indexed.
 
 ## C9. Gmail (Phase 5)
 

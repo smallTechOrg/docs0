@@ -53,7 +53,7 @@ class QuestionHandlerDraftTest {
                 new com.docs0.feedback.CorrectionRepository(jdbc), slack);
         handler = new QuestionHandler(new TenantService(jdbc, props), agent, new FakeKnowledge(),
                 new BudgetService(jdbc, props), new ConversationRepository(jdbc), new InteractionRepository(jdbc), slack,
-                flow, pending, Duration.ZERO);
+                flow, pending, new IdentityService(jdbc, slack), Duration.ZERO);
     }
 
     private static IncomingEvent mention(String text) {

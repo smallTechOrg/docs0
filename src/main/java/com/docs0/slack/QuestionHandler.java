@@ -72,6 +72,7 @@ public class QuestionHandler {
     private final SlackMessenger messenger;
     private final CorrectionFlow corrections;
     private final PendingActionRepository pendingActions;
+    private final IdentityService identities;
     private final long statusIntervalMillis;
 
     private final ExecutorService workers = Executors.newVirtualThreadPerTaskExecutor();
@@ -91,15 +92,16 @@ public class QuestionHandler {
     @Autowired
     public QuestionHandler(TenantService tenants, Agent agent, KnowledgeSearch knowledge, BudgetService budget,
             ConversationRepository conversations, InteractionRepository interactions, SlackMessenger messenger,
-            CorrectionFlow corrections, PendingActionRepository pendingActions) {
+            CorrectionFlow corrections, PendingActionRepository pendingActions, IdentityService identities) {
         this(tenants, agent, knowledge, budget, conversations, interactions, messenger, corrections, pendingActions,
-                STATUS_INTERVAL);
+                identities, STATUS_INTERVAL);
     }
 
     /** For tests: {@code statusInterval} is the minimum time between two status line updates. */
     QuestionHandler(TenantService tenants, Agent agent, KnowledgeSearch knowledge, BudgetService budget,
             ConversationRepository conversations, InteractionRepository interactions, SlackMessenger messenger,
-            CorrectionFlow corrections, PendingActionRepository pendingActions, Duration statusInterval) {
+            CorrectionFlow corrections, PendingActionRepository pendingActions, IdentityService identities,
+            Duration statusInterval) {
         this.tenants = tenants;
         this.agent = agent;
         this.knowledge = knowledge;
@@ -109,6 +111,7 @@ public class QuestionHandler {
         this.messenger = messenger;
         this.corrections = corrections;
         this.pendingActions = pendingActions;
+        this.identities = identities;
         this.statusIntervalMillis = statusInterval.toMillis();
     }
 
@@ -244,7 +247,7 @@ public class QuestionHandler {
         try {
             conversation = conversation(tenantId, q);
             List<Exchange> history = conversations.history(tenantId, conversation.id());
-            Audience audience = audience(q);
+            Audience audience = audience(tenantId, q);
             result = agent.answer(new AgentRequest(tenantId, audience, q.text(), history, conversation.id(), q.user()),
                     status::onStatus);
             if (result == null || result.kind() == null) {
@@ -390,15 +393,20 @@ public class QuestionHandler {
         return conversations.findOrCreate(tenantId, q.channel(), q.conversationThreadTs(), q.dm());
     }
 
-    /** Everyone who will see the answer: the channel's members, or just the asker in a DM. */
-    private Audience audience(Question q) {
+    /**
+     * Everyone who will see the answer: the channel's people, or just the asker in a DM. Bots,
+     * deactivated users and docs0 itself are not part of it. Each person carries their email when
+     * known, so documents shared by email can be matched. Anyone Slack cannot describe stays in as
+     * a plain Slack id, which can only make fewer restricted documents eligible, never more.
+     */
+    private Audience audience(long tenantId, Question q) {
         if (q.dm()) {
-            return Audience.of(q.user());
+            return new Audience(Set.of(asker(tenantId, q.user())));
         }
         try {
-            Set<String> members = messenger.channelMembers(q.channel());
-            if (members != null && !members.isEmpty()) {
-                return new Audience(members);
+            Set<String> ids = messenger.channelMembers(q.channel());
+            if (ids != null && !ids.isEmpty()) {
+                return people(tenantId, ids);
             }
             log.warn("Channel has no listed members, using the asker as audience: channel={}", q.channel());
         } catch (Exception e) {
@@ -406,6 +414,36 @@ public class QuestionHandler {
                     reason(e));
         }
         return Audience.of(q.user());
+    }
+
+    private Audience people(long tenantId, Set<String> ids) {
+        String own = botUserId();
+        Set<String> humans = new java.util.LinkedHashSet<>();
+        for (String id : ids) {
+            if (id != null && !id.isBlank() && !id.equals(own)) {
+                humans.add(id);
+            }
+        }
+        Map<String, IdentityService.Person> known = identities.resolve(tenantId, humans, IdentityService.DEFAULT_BUDGET);
+        Set<Audience.Member> members = new java.util.LinkedHashSet<>();
+        for (String id : humans) {
+            IdentityService.Person person = known.get(id);
+            if (person == null) {
+                members.add(new Audience.Member(id));
+            } else if (!person.bot() && !person.deleted()) {
+                members.add(new Audience.Member(id, person.email()));
+            }
+        }
+        return new Audience(members);
+    }
+
+    private Audience.Member asker(long tenantId, String user) {
+        try {
+            return identities.person(tenantId, user).map(p -> new Audience.Member(user, p.email()))
+                    .orElse(new Audience.Member(user));
+        } catch (RuntimeException e) {
+            return new Audience.Member(user);
+        }
     }
 
     private static AgentResult failure(Exception e, long durationMs) {

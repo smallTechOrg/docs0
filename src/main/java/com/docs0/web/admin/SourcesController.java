@@ -83,11 +83,12 @@ public class SourcesController {
     private final SyncRunRepository runs;
     private final DocumentStore documents;
     private final ToolPanels toolPanels;
+    private final SlackHistoryPanel slackHistory;
 
     public SourcesController(Docs0Properties props, TenantService tenants, DriveConnection connection,
                              DriveClient drive, DriveConnector connector, GoogleOAuth oauth, FolderCounts counts,
                              SyncService syncService, SyncRunRepository runs, DocumentStore documents,
-                             ToolPanels toolPanels) {
+                             ToolPanels toolPanels, SlackHistoryPanel slackHistory) {
         this.props = props;
         this.tenants = tenants;
         this.connection = connection;
@@ -99,6 +100,7 @@ public class SourcesController {
         this.runs = runs;
         this.documents = documents;
         this.toolPanels = toolPanels;
+        this.slackHistory = slackHistory;
     }
 
     @GetMapping(PAGE)
@@ -107,6 +109,7 @@ public class SourcesController {
                        @RequestParam(name = "confirm", required = false) String confirm, Model model) {
         long tenantId = tenants.current().id();
         toolPanels.addTo(model, tenantId, confirm);
+        slackHistory.addTo(model, tenantId);
         model.addAttribute("csrf", AdminGuard.csrfToken(request.getSession()));
         model.addAttribute("tenantName", tenants.current().name());
         model.addAttribute("redirectUri", props.googleRedirectUri());

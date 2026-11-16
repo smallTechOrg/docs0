@@ -2,16 +2,22 @@ package com.docs0.slack;
 
 import com.docs0.config.Docs0Properties;
 import com.slack.api.Slack;
+import com.slack.api.SlackConfig;
 import com.slack.api.methods.MethodsClient;
 import com.slack.api.methods.SlackApiException;
 import com.slack.api.methods.SlackApiTextResponse;
 import com.slack.api.methods.response.auth.AuthTestResponse;
 import com.slack.api.methods.response.conversations.ConversationsMembersResponse;
+import com.slack.api.model.ConversationType;
 import com.slack.api.model.block.LayoutBlock;
 import java.io.IOException;
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.function.LongConsumer;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 /** {@link SlackMessenger} on the Slack Web API client, using the bot token. */
@@ -24,12 +30,33 @@ public class BoltSlackMessenger implements SlackMessenger {
     /** Who the bot token belongs to. */
     public record Identity(String team, String botName, String botUserId) {}
 
-    private final MethodsClient client;
-    private volatile String botUserId;
+    static final int HISTORY_PAGE_SIZE = 200;
+    static final int MAX_HISTORY_PAGES = 500;
+    static final int MAX_RATE_LIMIT_RETRIES = 5;
+    static final long MAX_RETRY_AFTER_SECONDS = 60;
+    private static final long DEFAULT_RETRY_AFTER_SECONDS = 5;
 
+    private final MethodsClient client;
+    private final LongConsumer sleeper;
+    private volatile String botUserId;
+    private volatile Set<String> scopes;
+
+    @Autowired
     public BoltSlackMessenger(Docs0Properties props) {
-        String token = props.slack() == null || props.slack().botToken() == null ? "" : props.slack().botToken();
-        this.client = Slack.getInstance().methods(token);
+        this(props.slack() == null || props.slack().botToken() == null ? "" : props.slack().botToken(), null,
+                BoltSlackMessenger::sleepSeconds);
+    }
+
+    /** For tests: another API address (with a trailing slash) and a sleeper told how many seconds to wait. */
+    BoltSlackMessenger(String token, String methodsPrefix, LongConsumer sleeper) {
+        if (methodsPrefix == null) {
+            this.client = Slack.getInstance().methods(token);
+        } else {
+            SlackConfig config = new SlackConfig();
+            config.setMethodsEndpointUrlPrefix(methodsPrefix);
+            this.client = Slack.getInstance(config).methods(token);
+        }
+        this.sleeper = sleeper;
     }
 
     @Override
@@ -94,6 +121,10 @@ public class BoltSlackMessenger implements SlackMessenger {
         if (user == null) {
             return userId;
         }
+        return nameOf(user, userId);
+    }
+
+    private static String nameOf(com.slack.api.model.User user, String fallback) {
         var profile = user.getProfile();
         for (String name : new String[] {profile == null ? null : profile.getDisplayName(),
                 user.getRealName(), profile == null ? null : profile.getRealName(), user.getName()}) {
@@ -101,7 +132,127 @@ public class BoltSlackMessenger implements SlackMessenger {
                 return name.strip();
             }
         }
-        return userId;
+        return fallback;
+    }
+
+    @Override
+    public List<ChannelInfo> listChannels() {
+        List<ChannelInfo> channels = new ArrayList<>();
+        String cursor = null;
+        for (int page = 0; page < MAX_HISTORY_PAGES; page++) {
+            String pageCursor = cursor;
+            var response = call("conversations.list", () -> client.conversationsList(r -> r
+                    .types(List.of(ConversationType.PUBLIC_CHANNEL, ConversationType.PRIVATE_CHANNEL))
+                    .excludeArchived(true).limit(HISTORY_PAGE_SIZE).cursor(pageCursor)));
+            if (response.getChannels() != null) {
+                for (var c : response.getChannels()) {
+                    if (c.getId() != null && !c.isArchived()) {
+                        channels.add(new ChannelInfo(c.getId(), c.getName() == null ? c.getId() : c.getName(),
+                                c.isPrivate(), c.isMember(), c.getNumOfMembers() == null ? 0 : c.getNumOfMembers()));
+                    }
+                }
+            }
+            cursor = nextCursor(response.getResponseMetadata());
+            if (cursor == null) {
+                break;
+            }
+        }
+        return channels;
+    }
+
+    @Override
+    public List<SlackMessage> history(String channel, Instant oldest) {
+        String oldestTs = "%d.000000".formatted(oldest.getEpochSecond());
+        List<SlackMessage> messages = new ArrayList<>();
+        String cursor = null;
+        for (int page = 0; page < MAX_HISTORY_PAGES; page++) {
+            String pageCursor = cursor;
+            var response = call("conversations.history", () -> client.conversationsHistory(r -> r
+                    .channel(channel).oldest(oldestTs).limit(HISTORY_PAGE_SIZE).cursor(pageCursor)));
+            if (response.getMessages() != null) {
+                response.getMessages().forEach(m -> messages.add(message(m)));
+            }
+            cursor = response.isHasMore() ? nextCursor(response.getResponseMetadata()) : null;
+            if (cursor == null) {
+                break;
+            }
+        }
+        return messages;
+    }
+
+    @Override
+    public List<SlackMessage> replies(String channel, String threadTs) {
+        List<SlackMessage> messages = new ArrayList<>();
+        String cursor = null;
+        for (int page = 0; page < MAX_HISTORY_PAGES; page++) {
+            String pageCursor = cursor;
+            var response = call("conversations.replies", () -> client.conversationsReplies(r -> r
+                    .channel(channel).ts(threadTs).limit(HISTORY_PAGE_SIZE).cursor(pageCursor)));
+            if (response.getMessages() != null) {
+                response.getMessages().forEach(m -> messages.add(message(m)));
+            }
+            cursor = response.isHasMore() ? nextCursor(response.getResponseMetadata()) : null;
+            if (cursor == null) {
+                break;
+            }
+        }
+        return messages;
+    }
+
+    private static SlackMessage message(com.slack.api.model.Message m) {
+        List<String> files = new ArrayList<>();
+        if (m.getFiles() != null) {
+            for (var f : m.getFiles()) {
+                String title = f.getTitle() != null && !f.getTitle().isBlank() ? f.getTitle() : f.getName();
+                if (title != null && !title.isBlank()) {
+                    files.add(title.strip());
+                }
+            }
+        }
+        return new SlackMessage(m.getTs(), m.getThreadTs(), m.getUser(), m.getBotId(), m.getUsername(),
+                m.getSubtype(), m.getText(), m.getReplyCount() == null ? 0 : m.getReplyCount(), m.getLatestReply(),
+                m.getEdited() == null ? null : m.getEdited().getTs(), List.copyOf(files));
+    }
+
+    private static String nextCursor(com.slack.api.model.ResponseMetadata metadata) {
+        String cursor = metadata == null ? null : metadata.getNextCursor();
+        return cursor == null || cursor.isEmpty() ? null : cursor;
+    }
+
+    @Override
+    public String permalink(String channel, String ts) {
+        return call("chat.getPermalink", () -> client.chatGetPermalink(r -> r.channel(channel).messageTs(ts)))
+                .getPermalink();
+    }
+
+    @Override
+    public void joinChannel(String channel) {
+        call("conversations.join", () -> client.conversationsJoin(r -> r.channel(channel)));
+    }
+
+    @Override
+    public SlackUser userInfo(String userId) {
+        var user = call("users.info", () -> client.usersInfo(r -> r.user(userId))).getUser();
+        if (user == null) {
+            throw new SlackCallException("users.info", "user_not_found", null);
+        }
+        String email = user.getProfile() == null ? null : user.getProfile().getEmail();
+        return new SlackUser(userId, email == null || email.isBlank() ? null : email.strip(), nameOf(user, userId),
+                user.isBot(), user.isDeleted());
+    }
+
+    @Override
+    public Set<String> botScopes() {
+        Set<String> known = scopes;
+        if (known == null) {
+            try {
+                identify();
+            } catch (RuntimeException e) {
+                return Set.of();
+            }
+            known = scopes;
+        }
+        return known == null ? Set.of() : known;
     }
 
     @Override
@@ -114,6 +265,21 @@ public class BoltSlackMessenger implements SlackMessenger {
     public Identity identify() {
         AuthTestResponse response = call("auth.test", () -> client.authTest(r -> r));
         botUserId = response.getUserId();
+        // Slack lists the token's scopes in a response header.
+        var header = response.getHttpResponseHeaders() == null ? null
+                : response.getHttpResponseHeaders().entrySet().stream()
+                        .filter(e -> "x-oauth-scopes".equalsIgnoreCase(e.getKey())).findFirst().orElse(null);
+        if (header != null && header.getValue() != null) {
+            Set<String> granted = new java.util.HashSet<>();
+            for (String value : header.getValue()) {
+                for (String scope : value.split(",")) {
+                    if (!scope.isBlank()) {
+                        granted.add(scope.strip());
+                    }
+                }
+            }
+            scopes = Set.copyOf(granted);
+        }
         return new Identity(response.getTeam(), response.getUser(), response.getUserId());
     }
 
@@ -121,7 +287,43 @@ public class BoltSlackMessenger implements SlackMessenger {
         T run() throws IOException, SlackApiException;
     }
 
-    private static <T extends SlackApiTextResponse> T call(String method, SlackCall<T> call) {
+    /** One Slack call. A rate limit (HTTP 429) is waited out as Slack asks (Retry-After), a few times. */
+    private <T extends SlackApiTextResponse> T call(String method, SlackCall<T> call) {
+        for (int attempt = 0;; attempt++) {
+            try {
+                return callOnce(method, call);
+            } catch (SlackCallException e) {
+                if (!(e.getCause() instanceof SlackApiException api) || api.getResponse() == null
+                        || api.getResponse().code() != 429 || attempt >= MAX_RATE_LIMIT_RETRIES) {
+                    throw e;
+                }
+                sleeper.accept(retryAfterSeconds(api));
+            }
+        }
+    }
+
+    private static long retryAfterSeconds(SlackApiException e) {
+        String header = e.getResponse().header("Retry-After");
+        long seconds = DEFAULT_RETRY_AFTER_SECONDS;
+        try {
+            if (header != null) {
+                seconds = Long.parseLong(header.strip());
+            }
+        } catch (NumberFormatException ignored) {
+            // keep the default
+        }
+        return Math.max(0, Math.min(MAX_RETRY_AFTER_SECONDS, seconds));
+    }
+
+    private static void sleepSeconds(long seconds) {
+        try {
+            Thread.sleep(seconds * 1000);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+    }
+
+    private <T extends SlackApiTextResponse> T callOnce(String method, SlackCall<T> call) {
         T response;
         try {
             response = call.run();

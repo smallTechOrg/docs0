@@ -29,6 +29,42 @@ public interface SlackMessenger {
     /** docs0's own Slack user id. */
     String botUserId();
 
+    // ---- reading workspace content (Slack history, identities) ----------------------------------------
+
+    /** A public or private channel the bot can see. {@code member} is true when the bot is in it. */
+    record ChannelInfo(String id, String name, boolean isPrivate, boolean member, int memberCount) {}
+
+    /**
+     * One message as Slack returns it. {@code user} is null for some bot posts; {@code replyCount} and
+     * {@code latestReply} are set on the root of a thread; {@code editedTs} only on an edited message.
+     */
+    record SlackMessage(String ts, String threadTs, String user, String botId, String username, String subtype,
+            String text, int replyCount, String latestReply, String editedTs, List<String> fileTitles) {}
+
+    /** A Slack user as docs0 needs them. {@code email} is null when the app may not read emails. */
+    record SlackUser(String id, String email, String displayName, boolean bot, boolean deleted) {}
+
+    /** Non-archived public and private channels the bot can see. Private ones are only those it was invited to. */
+    List<ChannelInfo> listChannels();
+
+    /** Top-level messages of a channel since {@code oldest} (Slack returns replies only through {@link #replies}). */
+    List<SlackMessage> history(String channel, java.time.Instant oldest);
+
+    /** A thread: the root message first, then every reply. */
+    List<SlackMessage> replies(String channel, String threadTs);
+
+    /** A link to one message. */
+    String permalink(String channel, String ts);
+
+    /** Joins a public channel. */
+    void joinChannel(String channel);
+
+    /** Who a user is. */
+    SlackUser userInfo(String userId);
+
+    /** The scopes granted to the bot token, or an empty set when Slack did not say. */
+    Set<String> botScopes();
+
     /** A Slack call that did not succeed. {@code code} is Slack's error code or a short reason; never a secret. */
     class SlackCallException extends RuntimeException {
 

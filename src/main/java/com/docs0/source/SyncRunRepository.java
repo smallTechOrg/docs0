@@ -72,6 +72,18 @@ public class SyncRunRepository {
                 .optional();
     }
 
+    /** When the latest run that finished OK with nothing failed began, if there is one. */
+    public Optional<Instant> lastCleanStart(long tenantId, long sourceId) {
+        return jdbc.sql("""
+                        SELECT max(started_at) FROM sync_run
+                        WHERE tenant_id = :tenant AND source_id = :source AND status = 'OK' AND failed = 0
+                        """)
+                .param("tenant", tenantId)
+                .param("source", sourceId)
+                .query((rs, n) -> instant(rs, 1))
+                .list().stream().filter(java.util.Objects::nonNull).findFirst();
+    }
+
     /** The most recently started runs of a source, newest first. */
     public List<SyncRun> recent(long tenantId, long sourceId, int limit) {
         return jdbc.sql("""
@@ -87,6 +99,11 @@ public class SyncRunRepository {
     }
 
     private static Instant instant(ResultSet rs, String column) throws SQLException {
+        OffsetDateTime t = rs.getObject(column, OffsetDateTime.class);
+        return t == null ? null : t.toInstant();
+    }
+
+    private static Instant instant(ResultSet rs, int column) throws SQLException {
         OffsetDateTime t = rs.getObject(column, OffsetDateTime.class);
         return t == null ? null : t.toInstant();
     }

@@ -32,9 +32,9 @@ final class KnowledgeTools {
     static final String RECENT = "list_recent_documents";
     static final String SUBMIT = "submit_answer";
 
-    static final List<String> SOURCE_KINDS = List.of("GOOGLE_DRIVE", "LINEAR", "TRELLO");
+    static final List<String> SOURCE_KINDS = List.of("GOOGLE_DRIVE", "LINEAR", "TRELLO", "SLACK");
     private static final Map<String, String> SOURCE_NAMES =
-            Map.of("GOOGLE_DRIVE", "Drive", "LINEAR", "Linear", "TRELLO", "Trello");
+            Map.of("GOOGLE_DRIVE", "Drive", "LINEAR", "Linear", "TRELLO", "Trello", "SLACK", "Slack");
 
     static final int PAGE_CHARS = 60_000;
     static final int SEARCH_DEFAULT_LIMIT = 8;
@@ -78,7 +78,8 @@ final class KnowledgeTools {
                                     "type", "array",
                                     "description", "Optional. Only search these sources: GOOGLE_DRIVE for "
                                             + "documents, LINEAR for issues, projects and Linear documents, "
-                                            + "TRELLO for cards and boards. Leave out to search everything.",
+                                            + "TRELLO for cards and boards, SLACK for channel discussions. Leave out to search "
+                                            + "everything.",
                                     "items", obj("type", "string", "enum", SOURCE_KINDS))),
                     List.of("query"),
                     false),

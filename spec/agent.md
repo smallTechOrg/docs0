@@ -28,7 +28,7 @@ question + thread history
 
 | Tool | Input | Returns |
 |---|---|---|
-| `search_knowledge` | `query` (keywords or a phrase), optional `limit` (default 8, max 20), optional `source_kinds` (array of `GOOGLE_DRIVE`, `LINEAR`, `TRELLO`; default all) | For each hit: `document_id`, title, source kind, url, owner, modified date, a highlighted snippet, rank. Postgres `websearch_to_tsquery`; if a query has no hits, the tool retries with OR semantics and says so. |
+| `search_knowledge` | `query` (keywords or a phrase), optional `limit` (default 8, max 20), optional `source_kinds` (array of `GOOGLE_DRIVE`, `LINEAR`, `TRELLO`, `SLACK`; default all) | For each hit: `document_id`, title, source kind, url, owner, modified date, a highlighted snippet, rank. Postgres `websearch_to_tsquery`; if a query has no hits, the tool retries with OR semantics and says so. |
 | `read_document` | `document_id`, optional `offset` | Title, metadata and up to 60,000 characters of body from `offset`, plus `has_more` and `next_offset`. |
 | `list_recent_documents` | optional `limit` | Most recently modified documents. |
 | `list_linear_teams` | none | The selected Linear teams (key, name) and the priorities that can be set. |
@@ -39,6 +39,17 @@ question + thread history
 
 All tools are tenant-scoped and audience-scoped by the server; the model never passes a
 tenant or user id.
+
+### Audience filtering
+
+Every `search_knowledge`, `read_document` and `list_recent_documents` call, and the
+`AnswerVerifier`, runs with the request's `Audience`: the people who will see the answer (every
+member of the channel, or the one person in a DM, as `(Slack id, email?)` pairs; bots and
+deactivated users excluded). A restricted document (a private Slack channel's history, later a
+mailbox) is eligible only if every audience member is among its principals; an empty audience gets
+shared knowledge only. The filter is in the SQL of each query, so a document the audience may not see
+produces no hit, snippet or title, `read_document` on its id gives the same "not found" as a missing
+id, and a citation to it is dropped by the verifier. The model is never told that anything was hidden.
 
 ### Creating issues and cards: the confirm gate
 

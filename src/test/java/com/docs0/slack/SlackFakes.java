@@ -75,10 +75,10 @@ final class SlackFakes {
         @Override
         public Set<String> channelMembers(String channel) {
             memberLookups.incrementAndGet();
-            if (memberLookupFails) {
+            if (memberLookupFails || failingMembers.contains(channel)) {
                 throw new SlackCallException("conversations.members", "missing_scope", null);
             }
-            return members;
+            return channelMembers.getOrDefault(channel, members);
         }
 
         @Override
@@ -92,6 +92,86 @@ final class SlackFakes {
         @Override
         public String botUserId() {
             return "UBOT";
+        }
+
+        // ---- reading workspace content ----
+
+        final java.util.Map<String, SlackUser> users = new java.util.concurrent.ConcurrentHashMap<>();
+        final AtomicInteger userLookups = new AtomicInteger();
+        volatile boolean userInfoFails;
+        volatile String userInfoError = "ratelimited";
+        volatile Set<String> scopes = Set.of();
+        volatile List<ChannelInfo> channels = List.of();
+        final java.util.Map<String, Set<String>> channelMembers = new java.util.concurrent.ConcurrentHashMap<>();
+        final java.util.Map<String, List<SlackMessage>> historyByChannel = new java.util.concurrent.ConcurrentHashMap<>();
+        final java.util.Map<String, List<SlackMessage>> threads = new java.util.concurrent.ConcurrentHashMap<>();
+        final List<String> historyCalls = new CopyOnWriteArrayList<>();
+        final List<String> replyCalls = new CopyOnWriteArrayList<>();
+        final List<String> joins = new CopyOnWriteArrayList<>();
+        final List<java.time.Instant> historyFrom = new CopyOnWriteArrayList<>();
+        final Set<String> failingHistory = java.util.concurrent.ConcurrentHashMap.newKeySet();
+        final Set<String> failingJoins = java.util.concurrent.ConcurrentHashMap.newKeySet();
+        final Set<String> failingMembers = java.util.concurrent.ConcurrentHashMap.newKeySet();
+        volatile boolean permalinksFail;
+        volatile boolean listFails;
+
+        @Override
+        public List<ChannelInfo> listChannels() {
+            if (listFails) {
+                throw new SlackCallException("conversations.list", "network_error", null);
+            }
+            return channels;
+        }
+
+        @Override
+        public List<SlackMessage> history(String channel, java.time.Instant oldest) {
+            historyCalls.add(channel);
+            historyFrom.add(oldest);
+            if (failingHistory.contains(channel)) {
+                throw new SlackCallException("conversations.history", "internal_error", null);
+            }
+            return historyByChannel.getOrDefault(channel, List.of());
+        }
+
+        @Override
+        public List<SlackMessage> replies(String channel, String threadTs) {
+            replyCalls.add(channel + ":" + threadTs);
+            List<SlackMessage> thread = threads.get(channel + ":" + threadTs);
+            if (thread == null) {
+                throw new SlackCallException("conversations.replies", "thread_not_found", null);
+            }
+            return thread;
+        }
+
+        @Override
+        public String permalink(String channel, String ts) {
+            if (permalinksFail) {
+                throw new SlackCallException("chat.getPermalink", "message_not_found", null);
+            }
+            return "https://example.slack.com/archives/" + channel + "/p" + ts.replace(".", "");
+        }
+
+        @Override
+        public void joinChannel(String channel) {
+            if (failingJoins.contains(channel)) {
+                throw new SlackCallException("conversations.join", "missing_scope", null);
+            }
+            joins.add(channel);
+        }
+
+        @Override
+        public SlackUser userInfo(String userId) {
+            userLookups.incrementAndGet();
+            if (userInfoFails) {
+                throw new SlackCallException("users.info", userInfoError, null);
+            }
+            SlackUser user = users.get(userId);
+            return user != null ? user : new SlackUser(userId, null, names.getOrDefault(userId, userId), false, false);
+        }
+
+        @Override
+        public Set<String> botScopes() {
+            return scopes;
         }
 
         Posted onlyPost() {

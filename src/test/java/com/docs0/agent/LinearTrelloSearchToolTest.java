@@ -71,14 +71,14 @@ class LinearTrelloSearchToolTest {
 
     @Test
     void anUnknownSourceKindIsAnErrorTheModelCanFix() {
-        ToolCall bad = llm.call("search_knowledge", "query", "leave", "source_kinds", List.of("SLACK"));
+        ToolCall bad = llm.call("search_knowledge", "query", "leave", "source_kinds", List.of("GRAIN"));
         ToolCall notAList = llm.call("search_knowledge", "query", "leave", "source_kinds", "LINEAR");
         llm.calls(bad, notAList).calls(submit());
 
         ask();
 
         assertThat(llm.resultFor(bad).isError()).isTrue();
-        assertThat(llm.resultFor(bad).content()).contains("GOOGLE_DRIVE, LINEAR, TRELLO");
+        assertThat(llm.resultFor(bad).content()).contains("GOOGLE_DRIVE, LINEAR, TRELLO, SLACK");
         assertThat(llm.resultFor(notAList).isError()).isTrue();
     }
 
@@ -91,7 +91,7 @@ class LinearTrelloSearchToolTest {
         assertThat(kinds.get("type")).isEqualTo("array");
         @SuppressWarnings("unchecked")
         Map<String, Object> items = (Map<String, Object>) kinds.get("items");
-        assertThat(items.get("enum")).isEqualTo(List.of("GOOGLE_DRIVE", "LINEAR", "TRELLO"));
+        assertThat(items.get("enum")).isEqualTo(List.of("GOOGLE_DRIVE", "LINEAR", "TRELLO", "SLACK"));
         assertThat(search.required()).containsExactly("query");
         assertThat(search.description()).contains("Linear", "Trello");
     }

@@ -20,6 +20,8 @@ docs0:
     app-token: ""
   drive:
     sync-on-startup: false
+  slack-history:
+    days: 3
   google:
     oauth-client-id: ""
     oauth-client-secret: ""
