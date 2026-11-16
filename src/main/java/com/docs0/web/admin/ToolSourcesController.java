@@ -3,6 +3,9 @@ package com.docs0.web.admin;
 import com.docs0.source.Source;
 import com.docs0.source.SourceAccessException;
 import com.docs0.source.SyncService;
+import com.docs0.source.grain.GrainClient;
+import com.docs0.source.grain.GrainConnection;
+import com.docs0.source.grain.GrainConnector;
 import com.docs0.source.linear.LinearClient;
 import com.docs0.source.linear.LinearConnection;
 import com.docs0.source.linear.LinearConnector;
@@ -36,6 +39,7 @@ public class ToolSourcesController {
     private static final Logger log = LoggerFactory.getLogger(ToolSourcesController.class);
     private static final String LINEAR = SourcesController.PAGE + "/linear";
     private static final String TRELLO = SourcesController.PAGE + "/trello";
+    private static final String GRAIN = SourcesController.PAGE + "/grain";
     private static final int MAX_SECRET_CHARS = 300;
     /** Check access stops counting here; the page then shows "2,000+". */
     static final int CHECK_CAP = 2000;
@@ -47,12 +51,16 @@ public class ToolSourcesController {
     private final TrelloConnection trello;
     private final TrelloClient trelloClient;
     private final TrelloConnector trelloConnector;
+    private final GrainConnection grain;
+    private final GrainClient grainClient;
+    private final GrainConnector grainConnector;
     private final SyncService syncService;
     private final ToolPanels panels;
 
     public ToolSourcesController(TenantService tenants, LinearConnection linear, LinearClient linearClient,
                                  LinearConnector linearConnector, TrelloConnection trello,
                                  TrelloClient trelloClient, TrelloConnector trelloConnector,
+                                 GrainConnection grain, GrainClient grainClient, GrainConnector grainConnector,
                                  SyncService syncService, ToolPanels panels) {
         this.tenants = tenants;
         this.linear = linear;
@@ -61,6 +69,9 @@ public class ToolSourcesController {
         this.trello = trello;
         this.trelloClient = trelloClient;
         this.trelloConnector = trelloConnector;
+        this.grain = grain;
+        this.grainClient = grainClient;
+        this.grainConnector = grainConnector;
         this.syncService = syncService;
         this.panels = panels;
     }
@@ -276,6 +287,76 @@ public class ToolSourcesController {
         panels.forget(tenantId);
         flash.addFlashAttribute("notice", "Trello disconnected. Its cards no longer appear in answers.");
         return to("trello");
+    }
+
+    // ---- Grain ----------------------------------------------------------------------------
+
+    @PostMapping(GRAIN + "/connect")
+    public RedirectView connectGrain(@RequestParam(name = "token", required = false) String token,
+                                     RedirectAttributes flash) {
+        if (!grain.canStoreSecrets()) {
+            return failed(flash, "Grain needs DOCS0_ENCRYPTION_KEY to be set first. See the README.", "grain");
+        }
+        String secret = clean(token);
+        if (secret.isEmpty() || secret.length() > MAX_SECRET_CHARS) {
+            return failed(flash, "Paste your Grain access token first.", "grain");
+        }
+        GrainClient.Account account;
+        try {
+            account = grainClient.account(secret);
+        } catch (SourceAccessException e) {
+            return failed(flash, "Grain did not accept that token. Check it and try again. Nothing was saved.", "grain");
+        } catch (IOException | RuntimeException e) {
+            log.warn("Grain could not be reached to test a token: {}", e.getClass().getSimpleName());
+            return failed(flash, "Could not reach Grain to test the token. Try again in a moment. Nothing was saved.",
+                    "grain");
+        }
+        String name = firstNonBlank(account.name(), "a Grain account");
+        grain.connect(tenants.current().id(), name, secret);
+        flash.addFlashAttribute("notice", "Connected to " + name + ". Recordings are indexed at the next sync.");
+        return to("grain");
+    }
+
+    @PostMapping(GRAIN + "/check")
+    public RedirectView checkGrain(RedirectAttributes flash) {
+        long tenantId = tenants.current().id();
+        if (grain.credential(tenantId).isEmpty()) {
+            return failed(flash, "Connect Grain first.", "grain");
+        }
+        try {
+            int count = grainClient.countRecordings(grain.token(tenantId), grainConnector.windowStart(), CHECK_CAP);
+            flash.addFlashAttribute("notice", "docs0 can read " + describeCount(count, "recording")
+                    + " from the last " + grainConnector.historyDays() + " days.");
+        } catch (SourceAccessException e) {
+            return failed(flash, e.getMessage(), "grain");
+        } catch (IOException | RuntimeException e) {
+            log.warn("Grain access check failed: {}", e.getClass().getSimpleName());
+            return failed(flash, "Could not reach Grain. Try again in a moment.", "grain");
+        }
+        return to("grain");
+    }
+
+    @PostMapping(GRAIN + "/sync")
+    public RedirectView syncGrain(RedirectAttributes flash) {
+        if (grain.credential(tenants.current().id()).isEmpty()) {
+            return failed(flash, "Connect Grain first.", "grain");
+        }
+        if (!syncService.startInBackground(grainConnector)) {
+            flash.addFlashAttribute("notice", "A Grain sync is already running.");
+        }
+        return to("grain");
+    }
+
+    @PostMapping(GRAIN + "/disconnect")
+    public RedirectView disconnectGrain(RedirectAttributes flash) {
+        long tenantId = tenants.current().id();
+        Optional<Source> source = grain.source(tenantId);
+        if (source.isPresent() && syncService.isRunning(source.get().id())) {
+            return failed(flash, "A sync is running. Disconnect when it has finished.", "grain");
+        }
+        grain.disconnect(tenantId);
+        flash.addFlashAttribute("notice", "Grain disconnected. Its recordings no longer appear in answers.");
+        return to("grain");
     }
 
     // ---- helpers --------------------------------------------------------------------------

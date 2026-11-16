@@ -22,6 +22,8 @@ docs0:
     sync-on-startup: false
   slack-history:
     days: 3
+  grain:
+    days: 30
   google:
     oauth-client-id: ""
     oauth-client-secret: ""

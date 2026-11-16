@@ -8,6 +8,7 @@ import com.docs0.crypto.TokenCipher;
 import com.docs0.knowledge.DocumentStore;
 import com.docs0.source.drive.DriveConnection;
 import com.docs0.source.drive.DriveTestSetup;
+import com.docs0.source.grain.GrainConnection;
 import com.docs0.source.linear.LinearConnection;
 import com.docs0.source.trello.TrelloConnection;
 import org.junit.jupiter.api.Test;
@@ -53,6 +54,18 @@ class CredentialStorageTest extends IntegrationTest {
         assertThat(jdbc.sql("SELECT encrypted_refresh_token FROM source_credential").query(String.class).optional()).isEmpty();
         assertThat(linear.apiKey(tenant.id())).isEqualTo(PLAIN_KEY);
         assertThat(linear.credential(tenant.id()).orElseThrow().toString()).doesNotContain(secret).doesNotContain(PLAIN_KEY);
+    }
+
+    @Test
+    void aGrainTokenIsStoredAsCiphertextOnly() throws Exception {
+        GrainConnection grain = new GrainConnection(cipher, sources, credentials, store);
+
+        grain.connect(tenant.id(), "Acme Workspace", "grain_pat_PLAINTOKEN");
+
+        assertThat(wholeRow("GRAIN")).doesNotContain("grain_pat_PLAINTOKEN").doesNotContain("PLAINTOKEN");
+        assertThat(wholeRow("GRAIN")).contains("Acme Workspace");
+        assertThat(grain.token(tenant.id())).isEqualTo("grain_pat_PLAINTOKEN");
+        assertThat(grain.credential(tenant.id()).orElseThrow().toString()).doesNotContain("PLAINTOKEN");
     }
 
     @Test

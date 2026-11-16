@@ -120,6 +120,29 @@ counts, and one document per open card (list, labels, members, due date, descrip
 checklists with ✓ and ☐ items, and comments). docs0 stays under Trello's rate limit and backs
 off when Trello asks it to.
 
+### Grain (optional)
+
+Grain needs no OAuth client, only the `DOCS0_ENCRYPTION_KEY` from step 3. docs0 reads your
+meeting recordings (AI summary, notes, highlights and transcript) and never changes anything in
+Grain.
+
+1. In Grain open **Settings → Integrations → Public API** (<https://grain.com/app/settings/integrations?tab=api>).
+   A workspace admin can create a **workspace access token**, which sees every recording in the
+   workspace (not on every plan). Anyone can create a **personal access token** from their account
+   integrations page; it sees only that person's recordings. Copy the token.
+2. Open <http://localhost:8080/admin/sources>, find **Grain**, paste the token and click
+   **Connect Grain**. docs0 tests it with one call and stores it only if Grain accepts it. The
+   page then shows the account name; the token is never shown again.
+3. **Check access** shows how many recordings docs0 can read; **Sync now** starts a sync
+   (otherwise it runs at startup and every 15 minutes).
+
+Only recordings from the last 365 days are indexed. Change that with `DOCS0_GRAIN_HISTORY_DAYS`
+in `.env`; recordings that fall out of the window are removed from answers at the next sync.
+Each recording is one document: date, duration, participants, summary and notes, then the
+transcript with a time and speaker per line. A recording whose transcript is not ready yet is
+indexed with what exists and refreshed at the next syncs. **Disconnect** deletes the stored token
+and removes Grain recordings from answers.
+
 ### Slack history and private channels
 
 docs0 can also learn from what your team says in Slack, so it can answer "what did we decide

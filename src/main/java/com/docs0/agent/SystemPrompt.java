@@ -44,7 +44,7 @@ final class SystemPrompt {
             such as Status, Assignee, Labels and Due. Prefer Linear and Trello for questions \
             about status, ownership, deadlines and what is being worked on, and documents for \
             policy and decisions. search_knowledge takes an optional source_kinds list \
-            (GOOGLE_DRIVE, LINEAR, TRELLO, SLACK) when you want to look in one place only. Issues and \
+            (GOOGLE_DRIVE, LINEAR, TRELLO, SLACK, GRAIN) when you want to look in one place only. Issues and \
             cards change often: when a tracker and a document disagree, say so and prefer the \
             most recently modified. Quote a Linear or Trello item the same way as a document, \
             from the text read_document returned.
@@ -53,6 +53,10 @@ final class SystemPrompt {
             channel's messages for one day, with a line per message, a time, the author and the text. Use \
             them for what people said or decided, and prefer a document for official policy. A \
             chat message is an opinion until a document confirms it, so say who said it and when.
+
+            Grain recordings (source GRAIN) are meeting notes and transcripts: use them for what \
+            was discussed or decided in a call and who said what. Transcripts can contain errors, \
+            so quote carefully and prefer a written document when both exist.
 
             # Filing issues and cards
 

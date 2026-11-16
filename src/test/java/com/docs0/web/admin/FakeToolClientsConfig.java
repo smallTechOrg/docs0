@@ -1,5 +1,6 @@
 package com.docs0.web.admin;
 
+import com.docs0.source.grain.FakeGrainClient;
 import com.docs0.source.linear.FakeLinearClient;
 import com.docs0.source.trello.FakeTrelloClient;
 import org.springframework.boot.test.context.TestConfiguration;
@@ -20,5 +21,11 @@ public class FakeToolClientsConfig {
     @Primary
     FakeTrelloClient fakeTrelloClient() {
         return new FakeTrelloClient();
+    }
+
+    @Bean
+    @Primary
+    FakeGrainClient fakeGrainClient() {
+        return new FakeGrainClient();
     }
 }

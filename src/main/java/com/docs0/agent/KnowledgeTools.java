@@ -32,7 +32,7 @@ final class KnowledgeTools {
     static final String RECENT = "list_recent_documents";
     static final String SUBMIT = "submit_answer";
 
-    static final List<String> SOURCE_KINDS = List.of("GOOGLE_DRIVE", "LINEAR", "TRELLO", "SLACK");
+    static final List<String> SOURCE_KINDS = List.of("GOOGLE_DRIVE", "LINEAR", "TRELLO", "SLACK", "GRAIN");
     private static final Map<String, String> SOURCE_NAMES =
             Map.of("GOOGLE_DRIVE", "Drive", "LINEAR", "Linear", "TRELLO", "Trello", "SLACK", "Slack");
 

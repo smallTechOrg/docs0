@@ -71,15 +71,32 @@ class LinearTrelloSearchToolTest {
 
     @Test
     void anUnknownSourceKindIsAnErrorTheModelCanFix() {
-        ToolCall bad = llm.call("search_knowledge", "query", "leave", "source_kinds", List.of("GRAIN"));
+        ToolCall bad = llm.call("search_knowledge", "query", "leave", "source_kinds", List.of("NOTION"));
         ToolCall notAList = llm.call("search_knowledge", "query", "leave", "source_kinds", "LINEAR");
         llm.calls(bad, notAList).calls(submit());
 
         ask();
 
         assertThat(llm.resultFor(bad).isError()).isTrue();
-        assertThat(llm.resultFor(bad).content()).contains("GOOGLE_DRIVE, LINEAR, TRELLO, SLACK");
+        assertThat(llm.resultFor(bad).content()).contains("GOOGLE_DRIVE, LINEAR, TRELLO, SLACK, GRAIN");
         assertThat(llm.resultFor(notAList).isError()).isTrue();
+    }
+
+    @Test
+    void grainIsAcceptedAsASourceKindAndTheSystemPromptSaysWhatItIsFor() {
+        knowledge.documents.add(new Document(4, FakeKnowledge.TENANT, 4L, "GRAIN", "recording:r1", "Leave planning call",
+                "application/vnd.grain.recording", "https://grain.com/share/r1", "Asha", null,
+                Instant.parse("2026-10-03T00:00:00Z"), "Date: 2026-10-03\nWe discussed leave."));
+        ToolCall grain = llm.call("search_knowledge", "query", "leave", "source_kinds", List.of("grain"));
+        llm.calls(grain).calls(submit());
+
+        ask();
+
+        assertThat(llm.resultFor(grain).isError()).isFalse();
+        assertThat(llm.resultFor(grain).content()).contains("Leave planning call", "source: GRAIN")
+                .doesNotContain("Parental", "ENG-12");
+        assertThat(SystemPrompt.TEXT).contains("Grain recordings (source GRAIN) are meeting notes and transcripts",
+                "Transcripts can contain errors", "prefer a written document when both exist");
     }
 
     @Test
@@ -91,7 +108,7 @@ class LinearTrelloSearchToolTest {
         assertThat(kinds.get("type")).isEqualTo("array");
         @SuppressWarnings("unchecked")
         Map<String, Object> items = (Map<String, Object>) kinds.get("items");
-        assertThat(items.get("enum")).isEqualTo(List.of("GOOGLE_DRIVE", "LINEAR", "TRELLO", "SLACK"));
+        assertThat(items.get("enum")).isEqualTo(List.of("GOOGLE_DRIVE", "LINEAR", "TRELLO", "SLACK", "GRAIN"));
         assertThat(search.required()).containsExactly("query");
         assertThat(search.description()).contains("Linear", "Trello");
     }

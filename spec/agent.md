@@ -28,7 +28,7 @@ question + thread history
 
 | Tool | Input | Returns |
 |---|---|---|
-| `search_knowledge` | `query` (keywords or a phrase), optional `limit` (default 8, max 20), optional `source_kinds` (array of `GOOGLE_DRIVE`, `LINEAR`, `TRELLO`, `SLACK`; default all) | For each hit: `document_id`, title, source kind, url, owner, modified date, a highlighted snippet, rank. Postgres `websearch_to_tsquery`; if a query has no hits, the tool retries with OR semantics and says so. |
+| `search_knowledge` | `query` (keywords or a phrase), optional `limit` (default 8, max 20), optional `source_kinds` (array of `GOOGLE_DRIVE`, `LINEAR`, `TRELLO`, `SLACK`, `GRAIN`; default all) | For each hit: `document_id`, title, source kind, url, owner, modified date, a highlighted snippet, rank. Postgres `websearch_to_tsquery`; if a query has no hits, the tool retries with OR semantics and says so. |
 | `read_document` | `document_id`, optional `offset` | Title, metadata and up to 60,000 characters of body from `offset`, plus `has_more` and `next_offset`. |
 | `list_recent_documents` | optional `limit` | Most recently modified documents. |
 | `list_linear_teams` | none | The selected Linear teams (key, name) and the priorities that can be set. |
@@ -103,7 +103,9 @@ verified against a source.
 - Read the document before quoting it; snippets are for triage.
 - When sources disagree, say so and prefer the most recently modified. Linear issues and
   Trello cards are in the same index: prefer them for status, ownership and deadlines, and
-  documents for policy and decisions.
+  documents for policy and decisions. Grain recordings are meeting notes and transcripts: use
+  them for what was discussed or decided in a call and who said what; transcripts can contain
+  errors, so quote carefully and prefer a written document when both exist.
 - If the question is ambiguous between distinct things, ask one clarifying question.
 - If evidence is thin, give the best supported answer and mark confidence low.
 - If nothing is found, say so and name who might know.

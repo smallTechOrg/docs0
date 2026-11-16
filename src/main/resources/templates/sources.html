@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="referrer" content="no-referrer">
-  <meta http-equiv="refresh" content="4" th:if="${syncRunning} or ${linear.syncRunning} or ${trello.syncRunning} or ${slackHistory.syncRunning}">
+  <meta http-equiv="refresh" content="4" th:if="${syncRunning} or ${linear.syncRunning} or ${trello.syncRunning} or ${grain.syncRunning} or ${slackHistory.syncRunning}">
   <title>docs0 sources</title>
   <th:block th:replace="~{admin/fragments :: styles}"></th:block>
 </head>
@@ -16,7 +16,7 @@
     <a href="/">Back to status</a></p>
 
   <p class="sub" style="margin-top:8px">Jump to: <a href="#drive">Google Drive</a> · <a href="#linear">Linear</a> ·
-    <a href="#trello">Trello</a> · <a href="#slack">Slack history</a></p>
+    <a href="#trello">Trello</a> · <a href="#grain">Grain</a> · <a href="#slack">Slack history</a></p>
 
   <div class="card msg notice" th:if="${notice != null}" th:text="${notice}">notice</div>
   <div class="card msg error" th:if="${error != null}" th:text="${error}">error</div>
@@ -162,6 +162,7 @@
 
   <th:block th:replace="~{admin/tool-sources :: tool(${linear})}"></th:block>
   <th:block th:replace="~{admin/tool-sources :: tool(${trello})}"></th:block>
+  <th:block th:replace="~{admin/tool-sources :: tool(${grain})}"></th:block>
   <th:block th:replace="~{admin/slack-history :: slack(${slackHistory})}"></th:block>
 </main>
 </body>

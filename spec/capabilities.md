@@ -73,7 +73,7 @@ clarifying questions, honest "I don't know", suggested people, conflict handling
 
 ## C4. Status page (Phase 1)
 
-`/` shows: a link to the Sources page; Slack, Anthropic, Drive, Linear and Trello connection state with the reason when one is off;
+`/` shows: a link to the Sources page; Slack, Anthropic, Drive, Linear, Trello and Grain connection state with the reason when one is off;
 document count; last sync run; number of questions answered. `/health` returns JSON
 `{"status":"UP", ...}` with the same component states. No secrets are shown.
 
@@ -158,7 +158,7 @@ Slack thread, only after the asker confirms. It never edits or deletes anything 
 
 ## C8. Grain and Slack history (Phase 4)
 
-Grain notes and transcripts as shared knowledge (Phase 4b). Slack public channels as shared
+Grain notes and transcripts as shared knowledge (Phase 4b, built). Slack public channels as shared
 knowledge; private channels as restricted knowledge visible only when every audience member
 is in that channel. Introduces the audience filter (Phase 4a, built).
 
@@ -178,6 +178,24 @@ waited out as `Retry-After` says, a bounded number of times. Public-channel docu
 private-channel documents are restricted to the channel's current members. A de-selected, archived or
 inaccessible channel has its documents removed at the next sync. One failing channel or thread is
 counted and never aborts the run. DMs and group DMs are never indexed.
+
+**Grain (built).** Source `Grain` (kind `GRAIN`, shared knowledge, assumed by the owner). The admin
+pastes a Grain access token (a workspace token sees every recording of the workspace, a personal token
+only the user's own) on the Sources page. docs0 tests it once with `GET /token-info`, stores it only if
+Grain accepts it, AES-256-GCM encrypted like Linear's key, and shows the account name the test returned.
+The page has Check access (count of recordings in the window, capped at 2,000), Sync now, the last five
+runs and Disconnect. Only recordings that started in the last `DOCS0_GRAIN_HISTORY_DAYS` days
+(`docs0.grain.days`, default 365) are indexed; a recording that leaves the window or disappears from Grain
+is marked deleted at the next sync. One document per recording (`recording:<id>`, title the recording
+title or `Meeting <date>`, mime `application/vnd.grain.recording`, owner the first recorder, modified time
+the recording's end time): labelled Date, Duration, Participants, Recorded by and Link, then the AI
+summary, action items and highlights as Grain provides them, then the transcript as
+`[hh:mm:ss] Speaker: text` with consecutive lines by one speaker merged. Details and transcript are fetched
+only for recordings whose list-level time changed. A recording whose transcript is not ready is indexed
+with what exists and looked at again at each sync for 7 days. Grain's rate limit (429 with `Retry-After`) is
+waited out a bounded number of times. A rejected token fails the run with "Grain rejected the access token.
+Reconnect Grain on the Sources page." and deletes nothing; one failing recording is counted and never aborts
+the run. Status page component `Grain`. docs0 only reads from Grain.
 
 ## C9. Gmail (Phase 5)
 

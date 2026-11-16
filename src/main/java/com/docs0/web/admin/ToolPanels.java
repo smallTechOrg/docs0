@@ -6,6 +6,8 @@ import com.docs0.source.SourceCredential;
 import com.docs0.source.SyncRun;
 import com.docs0.source.SyncRunRepository;
 import com.docs0.source.SyncService;
+import com.docs0.source.grain.GrainConnection;
+import com.docs0.source.grain.GrainConnector;
 import com.docs0.source.linear.LinearClient;
 import com.docs0.source.linear.LinearConnection;
 import com.docs0.source.linear.LinearTeam;
@@ -37,6 +39,7 @@ public class ToolPanels {
 
     public static final String LINEAR = "linear";
     public static final String TRELLO = "trello";
+    public static final String GRAIN = "grain";
 
     /** A team or board in the checklist. */
     public record Choice(String id, String label, boolean checked) {}
@@ -56,7 +59,8 @@ public class ToolPanels {
     private static final Duration KEEP = Duration.ofMinutes(2);
     private static final int RECENT_RUNS = 5;
     private static final Map<String, String> KIND_LABELS = Map.of(
-            "GOOGLE_DRIVE", "Google Drive", "LINEAR", "Linear", "TRELLO", "Trello", "SLACK", "Slack history");
+            "GOOGLE_DRIVE", "Google Drive", "LINEAR", "Linear", "TRELLO", "Trello", "SLACK", "Slack history",
+            "GRAIN", "Grain");
 
     private record Cached<T>(List<T> items, Instant at) {}
 
@@ -64,6 +68,8 @@ public class ToolPanels {
     private final LinearClient linearClient;
     private final TrelloConnection trello;
     private final TrelloClient trelloClient;
+    private final GrainConnection grain;
+    private final GrainConnector grainConnector;
     private final SyncService syncService;
     private final SyncRunRepository runs;
     private final DocumentStore documents;
@@ -71,12 +77,14 @@ public class ToolPanels {
     private final Map<Long, Cached<TrelloBoard>> boardCache = new ConcurrentHashMap<>();
 
     public ToolPanels(LinearConnection linear, LinearClient linearClient, TrelloConnection trello,
-                      TrelloClient trelloClient, SyncService syncService, SyncRunRepository runs,
+                      TrelloClient trelloClient, GrainConnection grain, GrainConnector grainConnector, SyncService syncService, SyncRunRepository runs,
                       DocumentStore documents) {
         this.linear = linear;
         this.linearClient = linearClient;
         this.trello = trello;
         this.trelloClient = trelloClient;
+        this.grain = grain;
+        this.grainConnector = grainConnector;
         this.syncService = syncService;
         this.runs = runs;
         this.documents = documents;
@@ -86,6 +94,8 @@ public class ToolPanels {
     public void addTo(Model model, long tenantId, String confirmDisconnect) {
         model.addAttribute("linear", linearPanel(tenantId, LINEAR.equals(confirmDisconnect)));
         model.addAttribute("trello", trelloPanel(tenantId, TRELLO.equals(confirmDisconnect)));
+        model.addAttribute("grain", grainPanel(tenantId, GRAIN.equals(confirmDisconnect)));
+        model.addAttribute("grainDays", grainConnector.historyDays());
         List<KindCount> counts = new ArrayList<>();
         documents.countsByKind(tenantId).forEach((kind, n) -> counts.add(new KindCount(
                 KIND_LABELS.getOrDefault(kind, kind), n)));
@@ -162,6 +172,18 @@ public class ToolPanels {
             error = describe("Trello", e);
         }
         return connected(TRELLO, title, credential.get(), sourceId, confirm, choices, error);
+    }
+
+    private Panel grainPanel(long tenantId, boolean confirm) {
+        String title = "Grain";
+        if (!grain.canStoreSecrets()) {
+            return new Panel(GRAIN, title, "setup", null, false, false, 0, null, null, List.of());
+        }
+        Optional<SourceCredential> credential = grain.credential(tenantId);
+        if (credential.isEmpty()) {
+            return new Panel(GRAIN, title, "disconnected", null, false, false, 0, null, null, List.of());
+        }
+        return connected(GRAIN, title, credential.get(), credential.get().sourceId(), confirm, null, null);
     }
 
     private Panel connected(String id, String title, SourceCredential credential, long sourceId, boolean confirm,
