@@ -118,6 +118,11 @@ public class GrainConnector implements SourceConnector, StatusContributor {
                 .toList();
 
         Map<String, Stored> stored = documents.stored(tenantId, sourceId);
+        if (listed.isEmpty() && !stored.isEmpty()) {
+            // Safety net: an empty list when recordings were indexed before is more likely a filter or
+            // API problem than every meeting vanishing. Keep what is stored and report the run as failed.
+            throw new IOException("Grain returned no recordings this time, so the existing ones were kept.");
+        }
         Set<String> present = new HashSet<>();
         int added = 0;
         int updated = 0;

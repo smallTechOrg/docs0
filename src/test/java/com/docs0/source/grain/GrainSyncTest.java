@@ -136,6 +136,18 @@ class GrainSyncTest extends IntegrationTest {
     }
 
     @Test
+    void anEmptyListWhenMeetingsAreIndexedKeepsThemAndFailsTheRun() throws Exception {
+        add("r1", "Keep me", T0);
+        sync();
+
+        grain.recordings.clear();
+
+        assertThatThrownBy(this::sync).isInstanceOf(java.io.IOException.class).hasMessageContaining("kept");
+        assertThat(store.modifiedTimes(tenant.id(), sourceId())).containsOnlyKeys("recording:r1");
+        assertThat(search.search(tenant.id(), ANYONE, "keep", 5).hits()).hasSize(1);
+    }
+
+    @Test
     void recordingsOlderThanTheWindowAreNeverIndexed() throws Exception {
         add("old", "Ancient", Instant.parse("2025-01-01T09:00:00Z"));
 
