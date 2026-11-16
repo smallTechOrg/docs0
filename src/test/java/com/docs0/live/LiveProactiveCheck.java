@@ -82,7 +82,7 @@ class LiveProactiveCheck extends IntegrationTest {
         past(TestData.conversation(jdbc, tenant.id(), "C2", "1.2", false), "What is the process to reset my VPN password?");
 
         Optional<ProactiveResponder.Offer> paraphrase = consider("100.1",
-                "how much PTO do you get when you just joined the company?");
+                "How many vacation days do new hires get in the first year?");
         System.out.println("LIVE judge paraphrase -> " + paraphrase.isPresent() + " cost=" + usage());
         BigDecimal afterFirst = usage();
 
