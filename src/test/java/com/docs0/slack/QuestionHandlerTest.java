@@ -447,12 +447,12 @@ class QuestionHandlerTest {
     }
 
     @Test
-    void audienceFallsBackToTheAskerWhenMemberLookupFails() throws Exception {
+    void audienceIsSharedOnlyWhenMemberLookupFails() throws Exception {
         slack.memberLookupFails = true;
 
         await(handler.handle(mention("<@UBOT> what is our pricing?", "100.1", null, "Ev1")));
 
-        assertThat(agent.requests.get(0).audience()).isEqualTo(Audience.of("U1"));
+        assertThat(agent.requests.get(0).audience()).isEqualTo(Audience.sharedOnly());
         assertThat(slack.lastUpdate().text()).isEqualTo("Answer to: what is our pricing?");
     }
 

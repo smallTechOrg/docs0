@@ -408,12 +408,13 @@ public class QuestionHandler {
             if (ids != null && !ids.isEmpty()) {
                 return people(tenantId, ids);
             }
-            log.warn("Channel has no listed members, using the asker as audience: channel={}", q.channel());
+            log.warn("Channel has no listed members, answering from shared knowledge only: channel={}", q.channel());
         } catch (Exception e) {
-            log.warn("Channel member lookup failed, using the asker as audience: channel={} error={}", q.channel(),
-                    reason(e));
+            log.warn("Channel member lookup failed, answering from shared knowledge only: channel={} error={}",
+                    q.channel(), reason(e));
         }
-        return Audience.of(q.user());
+        // Unknown audience: everyone in the channel will see the answer, so use only shared knowledge.
+        return Audience.sharedOnly();
     }
 
     private Audience people(long tenantId, Set<String> ids) {

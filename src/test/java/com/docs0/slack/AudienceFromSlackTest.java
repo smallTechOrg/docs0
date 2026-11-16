@@ -174,7 +174,7 @@ class AudienceFromSlackTest {
     }
 
     @Test
-    void whenTheMemberListFailsTheAskerAloneIsTheAudienceAndSeesOnlyWhatTheyMay() throws Exception {
+    void whenTheMemberListFailsOnlySharedKnowledgeIsUsedBecauseTheChannelIsUnknown() throws Exception {
         long source = new SourceRepository(jdbc).findOrCreate(tenantId, "SLACK", "Slack history", "SHARED").id();
         DocumentStore store = new DocumentStore(jdbc);
         store.upsertRestricted(tenantId, source, new DocumentWrite("thread:C9:1.1", "Okapi in the leads channel",
@@ -186,10 +186,11 @@ class AudienceFromSlackTest {
         ask(CHANNEL, "U1");
 
         Audience audience = lastAudience();
-        assertThat(audience).isEqualTo(Audience.of("U1"));
+        assertThat(audience).isEqualTo(Audience.sharedOnly());
+        // Everyone in the channel will see the answer, so not even the asker's own private channel is used.
         List<String> titles = new JdbcKnowledgeSearch(jdbc).search(tenantId, audience, "okapi", 10).hits().stream()
                 .map(h -> h.title()).toList();
-        assertThat(titles).containsExactly("Okapi in my channel");
+        assertThat(titles).isEmpty();
     }
 
     @Test
