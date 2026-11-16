@@ -1,2 +1,94 @@
 # docs0
-a knowledge agent to manage all of your company's docs
+
+A knowledge agent for your company's docs and tools. The team asks it questions in Slack;
+it answers from the company's own content with source links and quoted snippets.
+
+docs0 does not use vector search or embeddings. Claude searches a keyword index, opens
+whole documents, and answers only from what it read. Every quote in an answer is checked
+against the source document before it is shown.
+
+**Status:** Phase 1 — answers from Google Drive. Linear, Trello, Grain, Slack history and
+Gmail follow, one phase at a time. See [spec/roadmap.md](spec/roadmap.md).
+
+## What you need
+
+- Java 25
+- PostgreSQL 14 or newer, running locally, with a database named `docs0`
+  (`createdb docs0`; tests use `docs0_test`)
+- An Anthropic API key
+- A Slack workspace where you can create an app
+- A Google Cloud service account that can read the Drive folders you want indexed
+
+## Setup
+
+Copy `.env.example` to `.env` and fill it in as you go. `.env` is git-ignored.
+
+### 1. Anthropic
+
+Set `DOCS0_ANTHROPIC_API_KEY`. The default model is `claude-sonnet-5-5`.
+`DOCS0_MONTHLY_BUDGET_USD` is a hard monthly cap: docs0 stops answering once the logged
+cost of the month's answers reaches it.
+
+### 2. Slack app
+
+1. Go to <https://api.slack.com/apps> → **Create New App** → **From a manifest**, pick
+   your workspace, and paste [slack/manifest.yml](slack/manifest.yml).
+2. **Install to Workspace**. Copy the **Bot User OAuth Token** (`xoxb-…`) from
+   *OAuth & Permissions* into `DOCS0_SLACK_BOT_TOKEN`.
+3. Under *Basic Information → App-Level Tokens*, generate a token with the
+   `connections:write` scope. Copy it (`xapp-…`) into `DOCS0_SLACK_APP_TOKEN`.
+4. Invite the bot to the channels where the team will use it: `/invite @docs0`.
+
+docs0 connects out to Slack over Socket Mode, so it needs no public URL.
+
+### 3. Google Drive
+
+1. In Google Cloud Console, create a project, enable the **Google Drive API**, and create
+   a **service account**. Create a JSON key for it and save the file outside the repo (or
+   under `secrets/`, which is git-ignored).
+2. Set `DOCS0_GOOGLE_CREDENTIALS_FILE` to the absolute path of that file.
+3. Share the Drive folders or shared drives you want indexed with the service account's
+   email address, as **Viewer**.
+4. Optional: set `DOCS0_DRIVE_FOLDER_IDS` to a comma-separated list of folder ids to
+   limit indexing to those folders. Left empty, docs0 indexes everything shared with the
+   service account.
+
+Indexed types: Google Docs, Sheets and Slides, PDFs, and plain text, Markdown and CSV
+files. docs0 syncs at startup and every 15 minutes.
+
+## Run
+
+```
+./mvnw spring-boot:run
+```
+
+Open <http://localhost:8080> for the status page: connection state for Slack, Anthropic
+and Drive, the document count, the last sync and this month's spend. `/health` returns
+the same as JSON. The app starts even when a credential is missing; the status page says
+what is not set up.
+
+## Use
+
+- Mention it in a channel: `@docs0 what is our refund policy?` It answers in a thread.
+- Reply in that thread to ask a follow-up. No mention needed.
+- Send it a direct message for a private conversation.
+
+Each answer lists its sources with the exact passage it relied on. When docs0 is unsure
+it says so, asks a clarifying question, or names who might know.
+
+## Test
+
+```
+./mvnw verify
+```
+
+Tests run against the real `docs0_test` Postgres database. They never use real Slack,
+Drive or Anthropic credentials.
+
+## Design
+
+- [spec/brief.md](spec/brief.md) — what docs0 is and the decisions behind it
+- [spec/architecture.md](spec/architecture.md) — stack, layout, data model, access model
+- [spec/agent.md](spec/agent.md) — how the agent searches, answers and verifies quotes
+- [spec/capabilities.md](spec/capabilities.md) — behaviour, capability by capability
+- [spec/roadmap.md](spec/roadmap.md) — phases
