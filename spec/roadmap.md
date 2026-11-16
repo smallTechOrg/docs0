@@ -35,11 +35,12 @@ root.
 ## Phase 2 — Feedback, corrections, admin dashboard
 
 - **Goal.** 👎/👍, reply-to-correct, admin review queue, corrections applied and cited,
-  cost totals. Capabilities C5, C6.
+  cost totals, and connecting Google Drive from the dashboard (sign in with Google, pick
+  folders, check access, sync now). Capabilities C5, C6.
 - **Gate.** `./mvnw -q verify`; live: a correction approved on the dashboard changes the
   answer to the same question and is cited.
 - **User test.** 👎 an answer, correct it in thread, approve it on the dashboard, ask
-  again.
+  again. Connect a Drive folder from the dashboard and see its documents appear.
 
 ## Phase 3 — Linear and Trello
 

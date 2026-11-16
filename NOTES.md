@@ -36,3 +36,8 @@ Run started: 2026-11-17 01:24 IST.
 - **`-q` hides Maven's test summary.** Exit code alone is thin evidence. → Counted tests
   from `target/surefire-reports/*.xml` after every gate. Lesson: the gate command should
   print counts.
+- **Connecting Drive was the slowest part of the gate.** A service account sees only
+  what is shared with it; the connected Drive account could not share folders it did not
+  own, and the gcloud login had no Drive scope. → Asked the owner to share, and started
+  a gcloud re-login with Drive access. Lesson: intake should ask who owns the content
+  and plan the access grant as a first-class setup step, ideally in the product UI.

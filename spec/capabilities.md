@@ -70,6 +70,22 @@ document count; last sync run; number of questions answered. `/health` returns J
 Protected by an admin password. Pages: sources and sync log; unhappy answers and
 corrections queue; cost totals per day and month; (later) insights.
 
+**Connect Google Drive from the dashboard.** An admin sets up company docs without
+touching Google Cloud or a terminal:
+
+- *Connect with Google.* The admin signs in with Google on the dashboard and picks the
+  folders and shared drives to index from a folder picker. docs0 stores the grant for
+  the tenant (encrypted) and indexes exactly what was picked. This is the default path
+  and the one other tenants will use.
+- *Service account (alternative).* The page shows the service account's email with a
+  copy button and the steps to share a folder with it as Viewer.
+- *Check access.* A button lists what docs0 can currently see (folders, file count) so
+  the admin knows the share worked before waiting for a sync.
+- *Sync now.* A button starts a sync immediately; progress and the result show on the
+  page.
+- Folders can be added or removed later; removing one drops its documents from answers
+  at the next sync.
+
 ## C7. Linear and Trello (Phase 3)
 
 Sync issues, projects, boards and cards as shared knowledge. On an explicit request in a
