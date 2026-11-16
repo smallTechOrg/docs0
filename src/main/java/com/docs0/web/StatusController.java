@@ -1,5 +1,6 @@
 package com.docs0.web;
 
+import com.docs0.config.Docs0Properties;
 import com.docs0.tenant.local.LocalTenantResolver;
 import com.docs0.web.StatusContributor.ComponentStatus;
 import java.util.LinkedHashMap;
@@ -14,15 +15,23 @@ public class StatusController {
 
     private final StatusService status;
     private final LocalTenantResolver local;
+    private final Docs0Properties props;
 
-    /** The public status page and /health report the configured local tenant only, never any other tenant. */
-    public StatusController(StatusService status, LocalTenantResolver local) {
+    /**
+     * The public status page and /health report the configured local tenant only, never any other tenant. In
+     * multi-tenant mode there is no single tenant to show: / is the landing page and /health says only UP.
+     */
+    public StatusController(StatusService status, LocalTenantResolver local, Docs0Properties props) {
         this.status = status;
         this.local = local;
+        this.props = props;
     }
 
     @GetMapping("/")
     public String page(Model model) {
+        if (props.multiTenant()) {
+            return "landing";
+        }
         model.addAttribute("s", status.snapshot(local.tenant().id()));
         return "status";
     }
@@ -31,6 +40,9 @@ public class StatusController {
     @GetMapping("/health")
     @ResponseBody
     public Map<String, Object> health() {
+        if (props.multiTenant()) {
+            return Map.of("status", "UP");
+        }
         var snap = status.snapshot(local.tenant().id());
         Map<String, Object> components = new LinkedHashMap<>();
         for (ComponentStatus c : snap.components()) {

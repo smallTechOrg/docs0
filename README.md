@@ -46,7 +46,8 @@ cost of the month's answers reaches it.
 If you created the app before feedback existed, paste the manifest again (*App Manifest*
 in the app settings) so the app also subscribes to `reaction_removed`.
 
-docs0 connects out to Slack over Socket Mode, so it needs no public URL.
+docs0 connects out to Slack over Socket Mode, so it needs no public URL. (To serve several companies instead,
+see [Running docs0 for several companies](#running-docs0-for-several-companies).)
 
 ### 3. Google Drive
 
@@ -292,8 +293,53 @@ Slack events and scheduled jobs each work for an explicitly named company, and a
 corrections, spend and Slack workspace can never reach the first. **The pilot setup above is unchanged**: one
 tenant created from `DOCS0_TENANT_SLUG`/`DOCS0_TENANT_NAME`, one admin password, Slack over Socket Mode with the
 tokens from `.env`. At startup docs0 registers that Slack workspace for the tenant (it stores the bot token
-encrypted, so `DOCS0_ENCRYPTION_KEY` must be set). Adding further companies through Slack install and per-company
-admin sign-in arrives in Phase 7b; see [spec/capabilities.md](spec/capabilities.md) (C11).
+encrypted, so `DOCS0_ENCRYPTION_KEY` must be set). Leave the three `DOCS0_SLACK_CLIENT_*`/`SIGNING_SECRET`
+settings blank and nothing below applies.
+
+### Running docs0 for several companies
+
+Socket Mode is for a single-company pilot. To let other companies add docs0 to their own Slack and manage their
+own docs, run it as a distributed Slack app:
+
+1. **Create the Slack app** from [slack/manifest-distributed.yml](slack/manifest-distributed.yml) (replace
+   `YOUR-DOMAIN` with your host first). It has the same scopes and events as the pilot manifest, but Slack calls
+   docs0 over HTTPS (`/slack/events`, `/slack/interactions`) instead of Socket Mode. Under *Manage Distribution*
+   activate public distribution. "Sign in with Slack" needs no scope line in the manifest, only the redirect URL
+   it already lists (`/admin/login/callback`).
+2. **Set three settings** from *Basic Information → App Credentials*: `DOCS0_SLACK_CLIENT_ID`,
+   `DOCS0_SLACK_CLIENT_SECRET` and `DOCS0_SLACK_SIGNING_SECRET`. With all three set, docs0 is in multi-tenant mode.
+   Also set `DOCS0_ENCRYPTION_KEY` (bot tokens are stored encrypted).
+3. **Use a public https URL.** `DOCS0_PUBLIC_URL` must be the public `https://` address Slack reaches (a reverse
+   proxy with TLS in front of docs0 is fine). docs0 logs a warning at startup when it is not https. Admin session
+   cookies are `HttpOnly`, `SameSite=Lax` and `Secure` when the URL is https.
+4. **What happens on install.** The landing page (`/`) has an **Add to Slack** button. When a workspace installs
+   docs0, a company is created for it (its name is made URL-safe and unique, for example `acme`, `acme-2`), the bot
+   token is stored encrypted, the installer becomes the company's first admin (by email, when Slack lets docs0
+   read it) and gets a welcome message with a link to the Start page. Installing again renews the token and keeps
+   the company's data; a suspended company stays suspended. If a workspace removes docs0 (Slack's `app_uninstalled`
+   or `tokens_revoked` events, which the app must be subscribed to), docs0 stops serving it but keeps its data.
+5. **Signing in.** Admins click **Sign in** (`/admin/login`) and use Sign in with Slack. They can enter their own
+   company only, if their email is on that company's admin list or Slack says they are a workspace admin or owner.
+   The **Start** page (`/admin/start`) is a checklist for the company (Slack connected, add knowledge, invite
+   docs0 to channels, try it) and where admins manage that list (up to 20 emails). Sessions last 8 hours idle.
+   In this mode the "local machine only" shortcut for `/admin` is off; the operator can still reach the admin
+   pages for the configured tenant with `DOCS0_ADMIN_PASSWORD` over HTTP Basic.
+6. **Budget per company.** Every company uses `DOCS0_MONTHLY_BUDGET_USD` unless it has its own cap. For now the
+   operator sets that in the database, in USD: `UPDATE tenant SET monthly_budget_usd = 25 WHERE slug = 'acme';`
+   (`NULL` goes back to the default). To suspend a company: `UPDATE tenant SET status = 'SUSPENDED' WHERE slug = ...`
+   (its admins can still sign in but only see a "suspended" page; set `'ACTIVE'` to lift it).
+7. **Google Drive caveat.** All companies connect Google Drive through the one Google OAuth client you configured
+   (`DOCS0_GOOGLE_OAUTH_CLIENT_ID`). For other companies' admins to sign in with it, that client must be set up as
+   an **External** app and pass Google's OAuth verification (Drive read-only is a restricted scope). With an
+   **Internal** client only people in your own Google Workspace domain can connect Drive. Linear, Trello and Grain
+   are connected with each company's own keys and are unaffected.
+8. **Isolation.** Every table carries the company's id, every query filters on it, and the database refuses a row
+   that points at another company's row. An admin's session holds the one company they signed in to; no URL,
+   form field or header can change it. Each company has its own Slack workspace and bot token, its own sources and
+   credentials, corrections, conversations, budget and admin list.
+
+Not built: per-company Anthropic keys (your key is shared, and so is the model bill), billing or plans,
+organization-wide Slack Enterprise Grid installs, and a super-admin console (use SQL).
 
 ## Use
 

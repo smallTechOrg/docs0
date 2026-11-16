@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <title th:text="${'docs0: ' + title}">docs0</title>
+  <th:block th:replace="~{admin/fragments :: styles}"></th:block>
+</head>
+<body>
+<main>
+  <nav class="top"><a class="brand" href="/">docs0</a></nav>
+  <h1 th:text="${title}">Title</h1>
+  <div class="card pad msg" th:classappend="${ok} ? 'notice' : 'error'" id="message">
+    <p th:text="${message}">Message</p>
+    <p th:if="${detail != null}" class="sub" th:text="${detail}">More</p>
+    <div class="actions" th:if="${linkHref != null}">
+      <a class="button primary" th:href="${linkHref}" th:text="${linkText}">Continue</a>
+      <a class="button" th:if="${secondHref != null}" th:href="${secondHref}" th:text="${secondText}">Other</a>
+    </div>
+    <form method="post" action="/admin/logout" th:if="${csrf != null}" style="margin-top:10px">
+      <input type="hidden" name="_csrf" th:value="${csrf}">
+      <button type="submit">Sign out</button>
+    </form>
+  </div>
+</main>
+</body>
+</html>

@@ -40,18 +40,18 @@ public class SlackWorkspaces {
         if (teamId == null || teamId.isBlank()) {
             return Optional.empty();
         }
-        return jdbc.sql("SELECT " + COLUMNS + " FROM slack_installation WHERE slack_team_id = :team")
+        return jdbc.sql("SELECT " + COLUMNS + " FROM slack_installation WHERE slack_team_id = :team AND revoked_at IS NULL")
                 .param("team", teamId).query((rs, n) -> row(rs)).optional();
     }
 
     public Optional<Installation> forTenant(long tenantId) {
-        return jdbc.sql("SELECT " + COLUMNS + " FROM slack_installation WHERE tenant_id = :tenant")
+        return jdbc.sql("SELECT " + COLUMNS + " FROM slack_installation WHERE tenant_id = :tenant AND revoked_at IS NULL")
                 .param("tenant", tenantId).query((rs, n) -> row(rs)).optional();
     }
 
     /** The tenant's bot token, decrypted. Empty when the tenant has no workspace. */
     public Optional<String> botToken(long tenantId) {
-        Optional<String> stored = jdbc.sql("SELECT encrypted_bot_token FROM slack_installation WHERE tenant_id = :tenant")
+        Optional<String> stored = jdbc.sql("SELECT encrypted_bot_token FROM slack_installation WHERE tenant_id = :tenant AND revoked_at IS NULL")
                 .param("tenant", tenantId).query(String.class).optional();
         return stored.map(cipher::decrypt);
     }
@@ -75,7 +75,7 @@ public class SlackWorkspaces {
                             ON CONFLICT (tenant_id) DO UPDATE SET
                                 slack_team_id = EXCLUDED.slack_team_id, team_name = EXCLUDED.team_name,
                                 encrypted_bot_token = EXCLUDED.encrypted_bot_token, bot_user_id = EXCLUDED.bot_user_id,
-                                installed_by = EXCLUDED.installed_by, scopes = EXCLUDED.scopes, updated_at = clock_timestamp()
+                                installed_by = EXCLUDED.installed_by, scopes = EXCLUDED.scopes, revoked_at = NULL, updated_at = clock_timestamp()
                             RETURNING %s
                             """.formatted(COLUMNS))
                     .param("tenant", tenantId).param("team", teamId)
@@ -90,6 +90,26 @@ public class SlackWorkspaces {
         } catch (DuplicateKeyException e) {
             throw new IllegalStateException("That Slack workspace is already connected to another company");
         }
+    }
+
+    /**
+     * The workspace removed docs0 or revoked its tokens. The row stays (and the token with it, unused) so the tenant
+     * and its data survive; nothing is served for the workspace until it installs docs0 again.
+     * Returns false when docs0 did not serve this workspace.
+     */
+    public boolean markRevoked(String teamId) {
+        if (teamId == null || teamId.isBlank()) {
+            return false;
+        }
+        int changed = jdbc.sql("""
+                        UPDATE slack_installation SET revoked_at = clock_timestamp(), updated_at = clock_timestamp()
+                        WHERE slack_team_id = :team AND revoked_at IS NULL
+                        """)
+                .param("team", teamId).update();
+        if (changed > 0) {
+            log.info("Slack workspace removed docs0: team={}", teamId);
+        }
+        return changed > 0;
     }
 
     private static Installation row(java.sql.ResultSet rs) throws java.sql.SQLException {

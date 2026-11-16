@@ -78,6 +78,12 @@ public class SlackGateway implements StatusContributor {
     /** The Socket Mode connection serves the pilot tenant only; every other tenant has no connection to report. */
     @Override
     public ComponentStatus status(long tenantId) {
+        boolean socketServes = configured() && pilot != null && tenantId == pilot.tenantId();
+        if (props.multiTenant() && workspaces != null && !socketServes) {
+            return workspaces.forTenant(tenantId)
+                    .map(w -> ComponentStatus.up(NAME, "connected to " + w.teamName() + " (events over HTTP)"))
+                    .orElseGet(() -> ComponentStatus.off(NAME, "docs0 is not installed in a Slack workspace"));
+        }
         if (pilot != null && tenantId != pilot.tenantId()) {
             return ComponentStatus.off(NAME, "not connected: Socket Mode serves only the configured workspace");
         }
@@ -154,22 +160,25 @@ public class SlackGateway implements StatusContributor {
         log.info("Slack connected: bot user {}", identity.botUserId());
     }
 
+    /**
+     * Socket Mode: Bolt delivers each payload, and every handler passes it to the same methods the HTTP endpoint
+     * uses ({@link #appMention} and friends), so the transport is the only difference.
+     */
     private void register(App app) {
         app.event(AppMentionEvent.class, (payload, ctx) -> {
-            dispatch(() -> incoming(payload.getTeamId(), fromMention(payload.getEvent(), payload.getEventId())));
+            appMention(payload.getTeamId(), payload.getEvent(), payload.getEventId());
             return ctx.ack();
         });
         app.event(MessageEvent.class, (payload, ctx) -> {
-            dispatch(() -> incoming(payload.getTeamId(), fromMessage(payload.getEvent(), payload.getEventId())));
+            message(payload.getTeamId(), payload.getEvent(), payload.getEventId());
             return ctx.ack();
         });
         app.blockAction(FOLLOW_UP_ACTION, (request, ctx) -> {
-            dispatch(() -> followUp(request.getPayload()));
+            blockAction(request.getPayload());
             return ctx.ack();
         });
-
         app.blockAction(DRAFT_ACTION, (request, ctx) -> {
-            dispatch(() -> draftClick(request.getPayload()));
+            blockAction(request.getPayload());
             return ctx.ack();
         });
 
@@ -183,13 +192,43 @@ public class SlackGateway implements StatusContributor {
         app.event(MessageThreadBroadcastEvent.class, (payload, ctx) -> ctx.ack());
         // Thumbs up and down on answers are feedback.
         app.event(ReactionAddedEvent.class, (payload, ctx) -> {
-            dispatch(() -> reaction(payload.getTeamId(), fromReactionAdded(payload.getEvent())));
+            reactionAdded(payload.getTeamId(), payload.getEvent());
             return ctx.ack();
         });
         app.event(ReactionRemovedEvent.class, (payload, ctx) -> {
-            dispatch(() -> reaction(payload.getTeamId(), fromReactionRemoved(payload.getEvent())));
+            reactionRemoved(payload.getTeamId(), payload.getEvent());
             return ctx.ack();
         });
+    }
+
+    // ---- the transport-independent entry points: Socket Mode and HTTP both end here ---------------------------
+
+    void appMention(String teamId, AppMentionEvent event, String eventId) {
+        dispatch(() -> incoming(teamId, fromMention(event, eventId)));
+    }
+
+    /** A message event without a subtype (a person's message). Subtyped messages are not questions. */
+    void message(String teamId, MessageEvent event, String eventId) {
+        dispatch(() -> incoming(teamId, fromMessage(event, eventId)));
+    }
+
+    void reactionAdded(String teamId, ReactionAddedEvent event) {
+        dispatch(() -> reaction(teamId, fromReactionAdded(event)));
+    }
+
+    void reactionRemoved(String teamId, ReactionRemovedEvent event) {
+        dispatch(() -> reaction(teamId, fromReactionRemoved(event)));
+    }
+
+    /** A click on a button docs0 posted: a follow-up question, or Create / Cancel under a draft. Others are ignored. */
+    void blockAction(BlockActionPayload payload) {
+        String actionId = payload == null || payload.getActions() == null || payload.getActions().isEmpty() ? null
+                : payload.getActions().get(0).getActionId();
+        if (actionId != null && FOLLOW_UP_ACTION.matcher(actionId).matches()) {
+            dispatch(() -> followUp(payload));
+        } else if (actionId != null && DRAFT_ACTION.matcher(actionId).matches()) {
+            dispatch(() -> draftClick(payload));
+        }
     }
 
     /**

@@ -34,6 +34,11 @@ docs0:
   slack:
     bot-token: ${DOCS0_SLACK_BOT_TOKEN:}
     app-token: ${DOCS0_SLACK_APP_TOKEN:}
+    # Distributed app (several companies). All three set = multi-tenant mode: Add to Slack, Slack events over HTTP,
+    # Sign in with Slack for admins. Leave blank for the single-company Socket Mode pilot.
+    client-id: ${DOCS0_SLACK_CLIENT_ID:}
+    client-secret: ${DOCS0_SLACK_CLIENT_SECRET:}
+    signing-secret: ${DOCS0_SLACK_SIGNING_SECRET:}
   drive:
     sync-interval-minutes: ${DOCS0_DRIVE_SYNC_INTERVAL_MINUTES:15}
     sync-on-startup: ${DOCS0_DRIVE_SYNC_ON_STARTUP:true}

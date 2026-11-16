@@ -79,4 +79,9 @@ root.
 - **Gate.** `./mvnw -q verify` including cross-tenant isolation tests.
 - **7a (done).** Explicit tenants everywhere, a Slack workspace registry with a client per tenant, per-tenant
   budget and suspension, an isolation audit and two-tenant isolation tests. The pilot is unchanged.
-- **7b (next).** Slack OAuth install, HTTP Events API, per-tenant admin sign-in, self-serve source connection.
+- **7b (done).** Self-serve onboarding: Add to Slack (OAuth v2) creates or renews a tenant and stores its bot
+  token encrypted; Slack events and interactivity over HTTP with signature verification, routed by workspace
+  (Socket Mode stays for the pilot); Sign in with Slack for each company's admins; a public landing page and a
+  per-company Start checklist with admin email management. Intentionally not built: per-tenant Anthropic keys
+  (the operator's key is shared), billing and plans, org-wide Enterprise Grid installs, a super-admin console
+  (limits are set in SQL).

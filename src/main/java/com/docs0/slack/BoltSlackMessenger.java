@@ -236,6 +236,13 @@ public class BoltSlackMessenger implements SlackMessenger {
     }
 
     @Override
+    public boolean isWorkspaceAdmin(String userId) {
+        var user = call("users.info", () -> client.usersInfo(r -> r.user(userId))).getUser();
+        return user != null && !user.isDeleted() && !user.isBot()
+                && (user.isAdmin() || user.isOwner() || user.isPrimaryOwner());
+    }
+
+    @Override
     public java.util.Optional<String> lookupByEmail(String email) {
         try {
             var user = call("users.lookupByEmail", () -> client.usersLookupByEmail(r -> r.email(email))).getUser();

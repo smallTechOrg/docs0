@@ -22,6 +22,9 @@ docs0:
   slack:
     bot-token: ""
     app-token: ""
+    client-id: ""
+    client-secret: ""
+    signing-secret: ""
   drive:
     sync-on-startup: false
   slack-history:

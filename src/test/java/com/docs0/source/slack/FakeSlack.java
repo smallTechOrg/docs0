@@ -77,6 +77,7 @@ public final class FakeSlack implements SlackMessenger, com.docs0.slack.SlackMes
         sent.clear();
         scopes = Set.of();
         workspaces.clear();
+        workspaceAdmins.clear();
     }
 
     // ---- building the workspace ----
@@ -251,6 +252,18 @@ public final class FakeSlack implements SlackMessenger, com.docs0.slack.SlackMes
 
     @Override
     public String userDisplayName(String userId) {
-        throw new UnsupportedOperationException();
+        SlackUser user = users.get(userId);
+        if (user == null) {
+            throw new UnsupportedOperationException();
+        }
+        return user.displayName();
+    }
+
+    /** Users Slack reports as workspace admins or owners. */
+    public final Set<String> workspaceAdmins = ConcurrentHashMap.newKeySet();
+
+    @Override
+    public boolean isWorkspaceAdmin(String userId) {
+        return workspaceAdmins.contains(userId);
     }
 }

@@ -62,6 +62,11 @@ public interface SlackMessenger {
     /** Who a user is. */
     SlackUser userInfo(String userId);
 
+    /** True when Slack says this person is an admin or owner of the workspace (users.info). */
+    default boolean isWorkspaceAdmin(String userId) {
+        return false;
+    }
+
     /** The Slack user with this email, or empty when there is none (or the workspace hides emails from the app). */
     java.util.Optional<String> lookupByEmail(String email);
 

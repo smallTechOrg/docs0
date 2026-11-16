@@ -30,7 +30,7 @@ NOTES.md                        build journal (harness friction only)
 src/main/java/com/docs0/
   Docs0Application.java
   config/                       typed settings (Docs0Properties), .env loading, beans
-  tenant/                       Tenant, TenantService (create/find/suspend)
+  tenant/                       Tenant, TenantService (create/find/suspend), AdminEmails
   tenant/local/                 single-tenant compatibility layer: the configured tenant, the password/loopback
                                 admin sign-in and the Socket Mode pilot registration (nothing else may use it)
   knowledge/                    Document model, DocumentRepository (upsert, search, read)
@@ -45,8 +45,10 @@ src/main/java/com/docs0/
   conversation/                 Conversation + Interaction log
   slack/                        SlackGateway (Bolt app), event handlers, message rendering, SlackWorkspaces
                                 (workspace registry) and SlackMessengers (a Slack client per tenant)
-  web/                          /health, status page
-  web/admin/                    admin guard, Sources page (connect Drive, pick folders, sync now)
+  web/                          /health, status page (landing page in multi-tenant mode)
+  web/slack/                    /slack/events and /slack/interactions (signed), Add to Slack install flow
+  web/admin/                    admin guard, Sources page (connect Drive, pick folders, sync now), Start page,
+                                Sign in with Slack (AdminLoginController, SlackAdminAuthenticator)
   crypto/                       TokenCipher (AES-GCM for stored grants)
 src/main/resources/
   application.yml
@@ -186,10 +188,10 @@ than a thread-local or request-scoped holder, so code cannot run for a tenant no
 
 | Work | Where the tenant comes from |
 |---|---|
-| An admin request (`/admin/**`) | `AdminGuard` asks the one `AdminAuthenticator` who is signed in. It returns an `AdminPrincipal(tenantId, displayName)`, stored on the request; controllers receive it as a method parameter. Today the only authenticator is the pilot's `LocalAdminAuthenticator` (DOCS0_ADMIN_PASSWORD over HTTP Basic, or loopback when no password is set), which maps to the configured tenant. Other sign-ins plug in behind the same interface. |
-| A Slack event, reaction or button click | The payload's workspace (`team_id`). `SlackGateway` looks it up in `SlackWorkspaces.byTeamId` and calls the handler with that tenant id; an event from a workspace nobody registered is ignored (only the team id is logged). Handlers never read a tenant from anywhere else. |
+| An admin request (`/admin/**`) | `AdminGuard` asks the one `AdminAuthenticator` who is signed in. It returns an `AdminPrincipal(tenantId, displayName)`, stored on the request; controllers receive it as a method parameter. Pilot: `LocalAdminAuthenticator` (DOCS0_ADMIN_PASSWORD over HTTP Basic, or loopback when no password is set), which maps to the configured tenant. Multi-tenant mode (Phase 7b): `SlackAdminAuthenticator` is primary and reads the `AdminPrincipal` that Sign in with Slack stored in the server-side session; only a request carrying the operator password falls through to the pilot sign-in, and the loopback shortcut is off. |
+| A Slack event, reaction or button click | The payload's workspace (`team_id`), over Socket Mode or HTTP. `SlackGateway` looks it up in `SlackWorkspaces.byTeamId` and calls the handler with that tenant id; an event from a workspace nobody registered, or that removed docs0, is ignored (only the team id is logged). Handlers never read a tenant from anywhere else. |
 | A scheduled job (`SyncScheduler`, startup sync, weekly digest) | Loops over `TenantService.active()`. Each tenant, and within it each configured connector, is tried on its own, so one failure never stops the rest. A suspended tenant is skipped. |
-| `/` and `/health` | The configured local tenant only (`LocalTenantResolver`), as before. They never show another tenant's name or counts. |
+| `/` and `/health` | Pilot: the configured local tenant only (`LocalTenantResolver`), as before. Multi-tenant mode: a public landing page and `{"status":"UP"}`. They never show any tenant's name or counts beyond the pilot's own. |
 
 `StatusContributor.status(tenantId)` and `SourceConnector.configured(tenantId)` take the tenant they report on;
 global components (the database, the model) ignore it.
@@ -205,7 +207,8 @@ a "current tenant" lookup.
 installed_by, scopes, created_at, updated_at)`: one workspace per tenant and one tenant per workspace. The bot
 token is AES-256-GCM encrypted with `DOCS0_ENCRYPTION_KEY`, decrypted only to build a client, and never logged.
 
-- `SlackWorkspaces`: `byTeamId`, `forTenant`, `register`, `botToken`.
+- `SlackWorkspaces`: `byTeamId`, `forTenant`, `register`, `botToken`, `markRevoked`. A revoked installation
+  (`revoked_at`, V9) is invisible to all of them until the workspace registers again.
 - `SlackMessengers.forTenant(tenantId)`: the `SlackMessenger` for that tenant's workspace (a `BoltSlackMessenger`
   on the tenant's own token), cached per tenant and rebuilt when the tenant is registered again. Every class that
   talks to Slack (question, reaction and draft handlers, corrections, identities, proactive answers, stale-document
@@ -228,3 +231,28 @@ token is AES-256-GCM encrypted with `DOCS0_ENCRYPTION_KEY`, decrypted only to bu
 - `TenantService` creates and finds tenants by id, slug and Slack team id. The first tenant stays `smalltech`,
   created from configuration.
 
+
+
+## Self-serve onboarding (Phase 7b)
+
+Multi-tenant mode is on when `docs0.slack.client-id`, `client-secret` and `signing-secret` are all set
+(`Docs0Properties.multiTenant()`); everything below is inert otherwise.
+
+**Slack transports.** Socket Mode (pilot) and HTTP deliver the same payloads to the same entry points,
+`SlackGateway.appMention`, `message`, `reactionAdded`, `reactionRemoved` and `blockAction`; the mapping to
+`IncomingEvent`/`ReactionEvent`/`DraftClick` and the tenant lookup are shared, so the transport is the only
+difference. For HTTP, `SlackEventsController` reads the raw body once, verifies `SlackSignature` on the bytes
+(constant-time, 5-minute window; bare 401 otherwise), answers `url_verification`, replies 200 immediately and runs
+`SlackHttpEvents` on a virtual thread. `SlackHttpEvents` parses the verified JSON with the Slack SDK model classes
+(a subtyped `message` is not a question, as in Bolt) and handles `app_uninstalled`/`tokens_revoked`. Retries
+(`X-Slack-Retry-Num`) of an event id already seen are dropped; the handlers de-duplicate by event id and by
+channel and ts as well. No servlet adapter for Bolt is on the classpath, and none was added.
+
+**OAuth.** `SlackOAuth` (oauth.v2.access) and `SlackSignIn` (openid.connect.token and userInfo) are the network
+edges, faked in tests like `GoogleOAuth`. State (and nonce) are random, single-use, bound to the browser session
+and expire after 10 minutes (`Clock` bean). `SlackInstaller` turns an install into a tenant plus an encrypted
+installation, then greets the installer.
+
+**Sessions.** The admin session holds an `AdminPrincipal`; `AdminGuard` is unchanged (CSRF token per session on
+every non-read request). `/admin/login` and `/admin/login/callback` are excluded from the guard only in this mode.
+`MultiTenantConfig` sets the session cookie flags and warns at startup when the public URL is not https.

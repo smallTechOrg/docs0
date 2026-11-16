@@ -318,7 +318,40 @@ one admin password, one configured tenant).
 - Not in 7a: there is still no way to *add* a tenant or its Slack workspace through the product (tenants and
   installations are created in code or SQL), and the only admin sign-in is the pilot's.
 
-**Phase 7b: onboarding (next).** Slack OAuth install (registers a workspace and creates or links the tenant),
-HTTP Events API and interactivity endpoints (so more than one workspace can be served, alongside or instead of
-Socket Mode), per-tenant admin sign-in (`AdminAuthenticator` implementation using `tenant.admin_emails`), and
-self-serve connection of each tenant's own sources.
+**Phase 7b: self-serve onboarding (delivered).** Enabled by setting `DOCS0_SLACK_CLIENT_ID`,
+`DOCS0_SLACK_CLIENT_SECRET` and `DOCS0_SLACK_SIGNING_SECRET` (multi-tenant mode, which also wants a public https
+`DOCS0_PUBLIC_URL`); with them blank the pilot behaves exactly as before.
+
+- **Add to Slack.** `GET /slack/install` redirects to Slack's OAuth v2 page with the bot scopes (one list,
+  `SlackScopes`, checked by a test against both manifests) and a single-use state bound to the browser session
+  (10 minutes). `GET /slack/oauth/callback` exchanges the code behind the `SlackOAuth` interface, then creates a
+  tenant for the workspace (slug from the team name, unique) or renews the installation of the tenant that already
+  has it, keeping its data. The bot token is stored encrypted (`SlackWorkspaces.register`). The installer's email
+  (users.info) becomes the first admin. A suspended tenant is never reactivated by a reinstall. The installer gets
+  a welcome DM (failure tolerated). `app_uninstalled` and `tokens_revoked` (bot token) mark the installation
+  revoked (`slack_installation.revoked_at`): nothing is served for it, the tenant and data stay.
+- **Events over HTTP.** `POST /slack/events` and `/slack/interactions` verify `X-Slack-Signature` (HMAC-SHA256 of
+  `v0:<timestamp>:<raw body>`, constant-time compare, 5-minute window; failure is a bare 401) on the raw bytes
+  before parsing anything. Verified requests get 200 at once and are handled on virtual threads; the payload is
+  parsed with the Slack SDK model classes and passed to the same `SlackGateway` methods the Socket Mode handlers
+  call, which resolve the tenant by `team_id` (unknown or revoked: ignored). `url_verification` returns the
+  challenge; Slack retries are dropped by event id and by the handlers' own de-duplication. Socket Mode runs only
+  when `DOCS0_SLACK_APP_TOKEN` and the bot token are set (the pilot); both transports may coexist.
+- **Sign in with Slack.** `SlackAdminAuthenticator` (consulted first in this mode): `GET /admin/login` ->
+  Slack OpenID Connect with state and nonce in the session; the callback maps the person's workspace to the tenant
+  with that `slack_team_id` and admits them if their email is in `tenant.admin_emails` or Slack says they are a
+  workspace admin or owner. The `AdminPrincipal(tenantId, name)` lives in a server-side session (id rotated at
+  sign-in, `HttpOnly`, `SameSite=Lax`, `Secure` on https, 8-hour idle timeout); `POST /admin/logout` ends it.
+  Browsers without a session are redirected to `/admin/login`, other clients get 401, and the pilot's loopback
+  shortcut is off. A suspended tenant's admins see only a suspended page. The session's tenant is the only tenant
+  any admin page or form can touch.
+- **Landing page and Start.** `/` is a public landing page with **Add to Slack** and **Sign in**, and `/health`
+  returns only `{"status":"UP"}`. `GET /admin/start` is the company's checklist (Slack connected, each source's
+  status with a link, inviting docs0, a sample question, the budget) and manages up to 20 admin emails.
+- **Manifests.** `slack/manifest-distributed.yml` (HTTP, `socket_mode_enabled: false`) next to the pilot's
+  `slack/manifest.yml`; a test requires the same bot scopes and events.
+
+Intentionally not built: per-tenant Anthropic keys (the operator's key and model bill are shared), billing or
+plans, organization-wide (Enterprise Grid) installs, a super-admin console (per-tenant budget and suspension are
+set in SQL), and Google Drive for other companies still depends on the shared Google OAuth client being an
+External, verified app.

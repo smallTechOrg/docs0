@@ -1,5 +1,6 @@
 package com.docs0.web.admin;
 
+import com.docs0.config.Docs0Properties;
 import java.util.List;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.MethodParameter;
@@ -16,14 +17,20 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 public class AdminWebConfig implements WebMvcConfigurer {
 
     private final AdminGuard guard;
+    private final Docs0Properties props;
 
-    public AdminWebConfig(AdminGuard guard) {
+    public AdminWebConfig(AdminGuard guard, Docs0Properties props) {
         this.guard = guard;
+        this.props = props;
     }
 
     @Override
     public void addInterceptors(InterceptorRegistry registry) {
-        registry.addInterceptor(guard).addPathPatterns("/admin", "/admin/**");
+        var registration = registry.addInterceptor(guard).addPathPatterns("/admin", "/admin/**");
+        if (props.multiTenant()) {
+            // The two pages a signed-out admin has to reach in order to sign in.
+            registration.excludePathPatterns("/admin/login", "/admin/login/callback");
+        }
     }
 
     @Override

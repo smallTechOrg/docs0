@@ -1,0 +1,61 @@
+# Slack app manifest for docs0 serving several companies (the distributed app).
+# Same scopes and events as slack/manifest.yml, but Slack calls docs0 over HTTPS instead of Socket Mode.
+#
+# 1. Replace YOUR-DOMAIN with the host in DOCS0_PUBLIC_URL (it must be a public https URL).
+# 2. https://api.slack.com/apps -> Create New App -> From a manifest -> paste this file.
+# 3. Basic Information -> App Credentials: copy Client ID, Client Secret and Signing Secret into
+#    DOCS0_SLACK_CLIENT_ID, DOCS0_SLACK_CLIENT_SECRET and DOCS0_SLACK_SIGNING_SECRET.
+# 4. Manage Distribution -> activate public distribution, so other workspaces can install it.
+# 5. "Sign in with Slack" (admins sign in to docs0 with it) asks for the openid, email and profile user scopes
+#    when the person signs in. It needs no scope line in this file, only the redirect URL below
+#    (OAuth & Permissions -> Redirect URLs).
+display_information:
+  name: docs0
+  description: Answers questions from your company's docs, with sources.
+  background_color: "#1f2937"
+features:
+  app_home:
+    home_tab_enabled: false
+    messages_tab_enabled: true
+    messages_tab_read_only_enabled: false
+  bot_user:
+    display_name: docs0
+    always_online: true
+oauth_config:
+  redirect_urls:
+    - https://YOUR-DOMAIN/slack/oauth/callback
+    - https://YOUR-DOMAIN/admin/login/callback
+  scopes:
+    bot:
+      - app_mentions:read
+      - chat:write
+      - channels:history
+      - groups:history
+      - im:history
+      - mpim:history
+      - channels:read
+      - groups:read
+      - im:read
+      - im:write
+      - mpim:read
+      - users:read
+      - users:read.email
+      - channels:join
+      - reactions:read
+settings:
+  event_subscriptions:
+    request_url: https://YOUR-DOMAIN/slack/events
+    bot_events:
+      - app_mention
+      - message.channels
+      - message.groups
+      - message.im
+      - message.mpim
+      - reaction_added
+      - reaction_removed
+  interactivity:
+    is_enabled: true
+    request_url: https://YOUR-DOMAIN/slack/interactions
+  org_deploy_enabled: false
+  socket_mode_enabled: false
+  token_rotation_enabled: false
