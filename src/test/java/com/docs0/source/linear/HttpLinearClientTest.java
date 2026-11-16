@@ -168,7 +168,7 @@ class HttpLinearClientTest {
         assertThat(second.comments()).isEmpty();
 
         String query = requests.get(0).body().get("query").getAsString();
-        assertThat(query).contains("issues(first: 50", "comments(first: 50)", "team: { id: { eq: $team } }");
+        assertThat(query).contains("issues(first: 25", "comments(first: 50)", "team: { id: { eq: $team } }");
         assertThat(variables(0).get("team").getAsString()).isEqualTo("team-eng");
         assertThat(variables(1).get("after").getAsString()).isEqualTo("cur-1");
         assertThat(requests).hasSize(2);

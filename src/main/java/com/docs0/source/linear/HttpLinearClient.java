@@ -36,7 +36,7 @@ public class HttpLinearClient implements LinearClient {
     public static final String ENDPOINT = "https://api.linear.app/graphql";
     public static final String REJECTED = "Linear rejected the API key. Reconnect Linear on the Sources page.";
 
-    static final int ISSUE_PAGE = 50;
+    static final int ISSUE_PAGE = 25;
     static final int COMMENTS_PER_ISSUE = 50;
     static final int LIST_PAGE = 100;
     static final int MAX_RETRIES = 4;
