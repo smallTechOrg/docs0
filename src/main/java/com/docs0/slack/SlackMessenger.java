@@ -14,6 +14,9 @@ public interface SlackMessenger {
      */
     String postMessage(String channel, String threadTs, String text, List<LayoutBlock> blocks);
 
+    /** A message only {@code user} sees. {@code threadTs} is null for an unthreaded message. */
+    void postEphemeral(String channel, String threadTs, String user, String text);
+
     /** Replaces the content of an existing message. */
     void updateMessage(String channel, String ts, String text, List<LayoutBlock> blocks);
 

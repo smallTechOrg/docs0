@@ -55,7 +55,8 @@ class CorrectionFlowTest {
         CorrectionFlow flow = new CorrectionFlow(new CorrectionDetector(llm, props), conversations, interactions,
                 feedback, new CorrectionRepository(jdbc), slack);
         handler = new QuestionHandler(tenants, agent, new FakeKnowledge(), new BudgetService(jdbc, props),
-                conversations, interactions, slack, flow, Duration.ZERO);
+                conversations, interactions, slack, flow, new com.docs0.action.PendingActionRepository(jdbc),
+                Duration.ZERO);
         reactions = new ReactionHandler(tenants, interactions, feedback, slack);
         slack.names.put("U1", "Arjun");
         slack.names.put("U2", "Meera");

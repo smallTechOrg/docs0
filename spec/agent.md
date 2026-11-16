@@ -19,6 +19,8 @@ question + thread history
          search_knowledge(query, source_kinds?, limit?)  -> ranked hits with snippets
          read_document(document_id, offset?)             -> full text, paged at 60k chars
          list_recent_documents(limit?)                   -> newest docs, for "what's new"
+         list_linear_teams / list_trello_boards_and_lists  (only when connected)
+         create_linear_issue / create_trello_card          (only when connected; save a draft)
          submit_answer(...)                              -> ends the loop
 ```
 
@@ -26,13 +28,39 @@ question + thread history
 
 | Tool | Input | Returns |
 |---|---|---|
-| `search_knowledge` | `query` (keywords or a phrase), optional `limit` (default 8, max 20) | For each hit: `document_id`, title, source kind, url, owner, modified date, a highlighted snippet, rank. Postgres `websearch_to_tsquery`; if a query has no hits, the tool retries with OR semantics and says so. |
+| `search_knowledge` | `query` (keywords or a phrase), optional `limit` (default 8, max 20), optional `source_kinds` (array of `GOOGLE_DRIVE`, `LINEAR`, `TRELLO`; default all) | For each hit: `document_id`, title, source kind, url, owner, modified date, a highlighted snippet, rank. Postgres `websearch_to_tsquery`; if a query has no hits, the tool retries with OR semantics and says so. |
 | `read_document` | `document_id`, optional `offset` | Title, metadata and up to 60,000 characters of body from `offset`, plus `has_more` and `next_offset`. |
 | `list_recent_documents` | optional `limit` | Most recently modified documents. |
+| `list_linear_teams` | none | The selected Linear teams (key, name) and the priorities that can be set. |
+| `create_linear_issue` | `team_key`, `title`, `description`, `priority` (urgent, high, medium, low, none), all required, strict schema | Saves a draft and says nothing was created. |
+| `list_trello_boards_and_lists` | none | The selected boards with their open lists. |
+| `create_trello_card` | `board`, `list`, `title`, `description`, all required, strict schema | Saves a draft and says nothing was created. |
 | `submit_answer` | see below | Ends the loop. |
 
 All tools are tenant-scoped and audience-scoped by the server; the model never passes a
 tenant or user id.
+
+### Creating issues and cards: the confirm gate
+
+The four Linear and Trello tools are offered per request, only when that source is connected
+and has a team or board chosen; otherwise they do not exist for the model. The create tools are
+described to the model as "use ONLY when the person explicitly asked, in this conversation, for
+the item to be filed; never on your own initiative", and the system prompt repeats it.
+
+A create tool call never writes to Linear or Trello. It validates the team key, or the board
+and list names against what is connected, stores a `pending_action` row (PENDING, with the
+conversation, the asker's Slack id and the resolved ids) and returns "NOTHING HAS BEEN CREATED"
+plus an instruction to say what was drafted. At most three drafts per answer; an identical
+repeat is stored once. `AgentResult.drafts` carries them. Slack posts each as a draft message in
+the thread with **Create** and **Cancel** buttons. Only the asker can click (anyone else gets a
+private reply); the first click claims the row atomically (PENDING to DONE) so a double click
+creates one item; a draft older than one hour is marked EXPIRED instead; a failed create marks
+the row FAILED with the error and shows a plain apology; success stores `result_url` and
+replaces the draft with a link. The row is linked to the interaction that produced it. A draft
+that never reached the thread, or whose answer failed, is cancelled.
+
+An answer that only announces a draft has no document to cite, so the grounding check does not
+mark it unverified when a draft was made.
 
 ### Final answer contract (`submit_answer`, strict schema)
 
@@ -62,7 +90,9 @@ verified against a source.
 - Answer only from what the tools return. Never from general knowledge about the company.
 - Search more than once with different wording before concluding something is absent.
 - Read the document before quoting it; snippets are for triage.
-- When sources disagree, say so and prefer the most recently modified.
+- When sources disagree, say so and prefer the most recently modified. Linear issues and
+  Trello cards are in the same index: prefer them for status, ownership and deadlines, and
+  documents for policy and decisions.
 - If the question is ambiguous between distinct things, ask one clarifying question.
 - If evidence is thin, give the best supported answer and mark confidence low.
 - If nothing is found, say so and name who might know.
@@ -105,8 +135,9 @@ of the whole DM.
   first user message (the system prompt stays constant) with author and date; the model
   must prefer them and say when one shaped the answer. Delivered in Phase 2.
 - More source kinds appear as more values behind `search_knowledge`, not more tools.
+  Linear and Trello were added this way in Phase 3.
 - `create_linear_issue` and `create_trello_card` are dedicated tools gated by an explicit
-  user request in the thread.
+  user request in the thread and a confirm button (delivered in Phase 3, see above).
 - Repeat-question detection for proactive answers: keyword search over past questions,
   then a cheap model call to judge "same question?" before answering unprompted.
 - Insights (FAQ, gaps) are a scheduled batch job over the interaction log, one call per

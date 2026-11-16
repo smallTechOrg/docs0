@@ -447,7 +447,7 @@ class SourcesPageTest extends IntegrationTest {
 
         int forms = html.split("<form ", -1).length - 1;
         int tokens = html.split("name=\"_csrf\" value=\"" + csrf + "\"", -1).length - 1;
-        assertThat(forms).isEqualTo(4); // disconnect, remove, sync, add
+        assertThat(forms).isEqualTo(6); // disconnect, remove, sync, add, and the Linear and Trello connect forms
         assertThat(tokens).isEqualTo(forms);
         assertThat(html).doesNotContain("method=\"get\"");
     }

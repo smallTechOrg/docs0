@@ -82,10 +82,12 @@ public class SourcesController {
     private final SyncService syncService;
     private final SyncRunRepository runs;
     private final DocumentStore documents;
+    private final ToolPanels toolPanels;
 
     public SourcesController(Docs0Properties props, TenantService tenants, DriveConnection connection,
                              DriveClient drive, DriveConnector connector, GoogleOAuth oauth, FolderCounts counts,
-                             SyncService syncService, SyncRunRepository runs, DocumentStore documents) {
+                             SyncService syncService, SyncRunRepository runs, DocumentStore documents,
+                             ToolPanels toolPanels) {
         this.props = props;
         this.tenants = tenants;
         this.connection = connection;
@@ -96,12 +98,15 @@ public class SourcesController {
         this.syncService = syncService;
         this.runs = runs;
         this.documents = documents;
+        this.toolPanels = toolPanels;
     }
 
     @GetMapping(PAGE)
     public String page(HttpServletRequest request,
-                       @RequestParam(name = "disconnect", required = false) String disconnect, Model model) {
+                       @RequestParam(name = "disconnect", required = false) String disconnect,
+                       @RequestParam(name = "confirm", required = false) String confirm, Model model) {
         long tenantId = tenants.current().id();
+        toolPanels.addTo(model, tenantId, confirm);
         model.addAttribute("csrf", AdminGuard.csrfToken(request.getSession()));
         model.addAttribute("tenantName", tenants.current().name());
         model.addAttribute("redirectUri", props.googleRedirectUri());
@@ -278,7 +283,7 @@ public class SourcesController {
         return to(PAGE);
     }
 
-    private static RunRow runRow(SyncRun run, boolean running) {
+    static RunRow runRow(SyncRun run, boolean running) {
         String state;
         String label;
         if (SyncRun.OK.equals(run.status())) {

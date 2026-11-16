@@ -17,7 +17,7 @@ public class SourceCredentialRepository {
 
     public Optional<SourceCredential> find(long tenantId, long sourceId) {
         return jdbc.sql("""
-                        SELECT tenant_id, source_id, account_email, encrypted_refresh_token, created_at
+                        SELECT tenant_id, source_id, account_email, encrypted_refresh_token, encrypted_secret, created_at
                         FROM source_credential
                         WHERE tenant_id = :tenant AND source_id = :source
                         """)
@@ -25,6 +25,7 @@ public class SourceCredentialRepository {
                 .param("source", sourceId)
                 .query((rs, n) -> new SourceCredential(rs.getLong("tenant_id"), rs.getLong("source_id"),
                         rs.getString("account_email"), rs.getString("encrypted_refresh_token"),
+                        rs.getString("encrypted_secret"),
                         rs.getObject("created_at", OffsetDateTime.class).toInstant()))
                 .optional();
     }
@@ -38,10 +39,30 @@ public class SourceCredentialRepository {
                         ON CONFLICT (source_id) DO UPDATE SET
                             account_email = EXCLUDED.account_email,
                             encrypted_refresh_token = EXCLUDED.encrypted_refresh_token,
+                            encrypted_secret = NULL,
                             created_at = now()
                         """)
                 .param("email", accountEmail)
                 .param("token", encryptedRefreshToken)
+                .param("tenant", tenantId)
+                .param("source", sourceId)
+                .update();
+    }
+
+    /** Stores an encrypted JSON secret (Linear, Trello) for a source, replacing any earlier credential. */
+    public void saveSecret(long tenantId, long sourceId, String accountName, String encryptedSecret) {
+        jdbc.sql("""
+                        INSERT INTO source_credential (tenant_id, source_id, account_email, encrypted_secret)
+                        SELECT s.tenant_id, s.id, :name, :secret FROM source s
+                        WHERE s.tenant_id = :tenant AND s.id = :source
+                        ON CONFLICT (source_id) DO UPDATE SET
+                            account_email = EXCLUDED.account_email,
+                            encrypted_refresh_token = NULL,
+                            encrypted_secret = EXCLUDED.encrypted_secret,
+                            created_at = now()
+                        """)
+                .param("name", accountName)
+                .param("secret", encryptedSecret)
                 .param("tenant", tenantId)
                 .param("source", sourceId)
                 .update();

@@ -1,5 +1,7 @@
 package com.docs0.slack;
 
+import com.docs0.action.PendingAction;
+import com.docs0.action.PendingActionRepository;
 import com.docs0.agent.Agent;
 import com.docs0.agent.Agent.AgentRequest;
 import com.docs0.agent.Agent.AgentResult;
@@ -69,6 +71,7 @@ public class QuestionHandler {
     private final InteractionRepository interactions;
     private final SlackMessenger messenger;
     private final CorrectionFlow corrections;
+    private final PendingActionRepository pendingActions;
     private final long statusIntervalMillis;
 
     private final ExecutorService workers = Executors.newVirtualThreadPerTaskExecutor();
@@ -88,14 +91,15 @@ public class QuestionHandler {
     @Autowired
     public QuestionHandler(TenantService tenants, Agent agent, KnowledgeSearch knowledge, BudgetService budget,
             ConversationRepository conversations, InteractionRepository interactions, SlackMessenger messenger,
-            CorrectionFlow corrections) {
-        this(tenants, agent, knowledge, budget, conversations, interactions, messenger, corrections, STATUS_INTERVAL);
+            CorrectionFlow corrections, PendingActionRepository pendingActions) {
+        this(tenants, agent, knowledge, budget, conversations, interactions, messenger, corrections, pendingActions,
+                STATUS_INTERVAL);
     }
 
     /** For tests: {@code statusInterval} is the minimum time between two status line updates. */
     QuestionHandler(TenantService tenants, Agent agent, KnowledgeSearch knowledge, BudgetService budget,
             ConversationRepository conversations, InteractionRepository interactions, SlackMessenger messenger,
-            CorrectionFlow corrections, Duration statusInterval) {
+            CorrectionFlow corrections, PendingActionRepository pendingActions, Duration statusInterval) {
         this.tenants = tenants;
         this.agent = agent;
         this.knowledge = knowledge;
@@ -104,6 +108,7 @@ public class QuestionHandler {
         this.interactions = interactions;
         this.messenger = messenger;
         this.corrections = corrections;
+        this.pendingActions = pendingActions;
         this.statusIntervalMillis = statusInterval.toMillis();
     }
 
@@ -240,7 +245,8 @@ public class QuestionHandler {
             conversation = conversation(tenantId, q);
             List<Exchange> history = conversations.history(tenantId, conversation.id());
             Audience audience = audience(q);
-            result = agent.answer(new AgentRequest(tenantId, audience, q.text(), history), status::onStatus);
+            result = agent.answer(new AgentRequest(tenantId, audience, q.text(), history, conversation.id(), q.user()),
+                    status::onStatus);
             if (result == null || result.kind() == null) {
                 throw new IllegalStateException("agent returned no result");
             }
@@ -256,16 +262,68 @@ public class QuestionHandler {
 
         if (conversation == null) {
             log.warn("Interaction not logged, no conversation: tenant={} channel={}", tenantId, q.channel());
+            discardDrafts(tenantId, result);
             return;
         }
         try {
             long id = interactions.insert(tenantId, conversation.id(), q.user(), q.text(), result, statusTs);
+            link(tenantId, result, id);
             log.info("Answered: tenant={} interaction={} kind={} steps={} inputTokens={} outputTokens={} ms={}",
                     tenantId, id, result.kind(), result.steps(), result.inputTokens(), result.outputTokens(),
                     result.durationMs());
         } catch (Exception e) {
             log.warn("Interaction not logged: tenant={} conversation={} error={}", tenantId, conversation.id(),
                     e.getClass().getName());
+        }
+        postDrafts(tenantId, q, result);
+    }
+
+    /** Ties the drafts of an answer to the interaction that produced them. */
+    private void link(long tenantId, AgentResult result, long interactionId) {
+        if (result.drafts() == null || result.drafts().isEmpty()) {
+            return;
+        }
+        try {
+            pendingActions.attachInteraction(tenantId, result.drafts().stream().map(PendingAction::id).toList(),
+                    interactionId);
+        } catch (RuntimeException e) {
+            log.warn("Drafts not linked to the interaction: tenant={} error={}", tenantId, e.getClass().getName());
+        }
+    }
+
+    /**
+     * Posts each draft of the answer in the thread, with its Create and Cancel buttons. A draft
+     * that could not be shown is dropped, so nothing can be confirmed that nobody saw.
+     */
+    private void postDrafts(long tenantId, Question q, AgentResult result) {
+        if (result.drafts() == null || result.drafts().isEmpty()) {
+            return;
+        }
+        if (result.kind() == Kind.ERROR) {
+            discardDrafts(tenantId, result);
+            return;
+        }
+        for (PendingAction draft : result.drafts()) {
+            try {
+                AnswerRenderer.Rendered rendered = AnswerRenderer.renderDraft(draft);
+                messenger.postMessage(q.channel(), q.replyThreadTs(), rendered.text(), rendered.blocks());
+            } catch (RuntimeException e) {
+                log.warn("Draft could not be shown: tenant={} draft={} error={}", tenantId, draft.id(), reason(e));
+                pendingActions.discard(tenantId, draft.id());
+            }
+        }
+    }
+
+    private void discardDrafts(long tenantId, AgentResult result) {
+        if (result.drafts() == null) {
+            return;
+        }
+        for (PendingAction draft : result.drafts()) {
+            try {
+                pendingActions.discard(tenantId, draft.id());
+            } catch (RuntimeException e) {
+                log.warn("Draft not discarded: tenant={} draft={}", tenantId, draft.id());
+            }
         }
     }
 
@@ -307,7 +365,7 @@ public class QuestionHandler {
                 result = new AgentResult(Kind.ERROR, result.answer(), result.confidence(), result.citations(),
                         result.followUps(), result.suggestedPeople(), result.steps(), result.inputTokens(),
                         result.outputTokens(), result.costUsd(), result.durationMs(),
-                        "could not show the answer in Slack: " + reason(e), result.correctionIds());
+                        "could not show the answer in Slack: " + reason(e), result.correctionIds(), result.drafts());
             }
         }
         try {

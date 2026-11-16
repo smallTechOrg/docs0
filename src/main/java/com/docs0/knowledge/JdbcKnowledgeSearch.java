@@ -6,6 +6,7 @@ import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.stream.Collectors;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
@@ -39,7 +40,7 @@ public class JdbcKnowledgeSearch implements KnowledgeSearch {
                 FROM document d
                 JOIN source s ON s.id = d.source_id AND s.tenant_id = d.tenant_id
                 CROSS JOIN (SELECT %s AS tsq) q
-                WHERE d.tenant_id = :tenant AND NOT d.deleted AND d.search @@ q.tsq
+                WHERE d.tenant_id = :tenant AND NOT d.deleted AND d.search @@ q.tsq%s
                 ORDER BY rank DESC, d.modified_at DESC NULLS LAST, d.id DESC
                 LIMIT :limit
             ) r
@@ -55,6 +56,11 @@ public class JdbcKnowledgeSearch implements KnowledgeSearch {
 
     @Override
     public SearchResult search(long tenantId, Audience audience, String query, int limit) {
+        return search(tenantId, audience, query, limit, Set.of());
+    }
+
+    @Override
+    public SearchResult search(long tenantId, Audience audience, String query, int limit, Set<String> sourceKinds) {
         if (query == null || query.isBlank()) {
             return new SearchResult(List.of(), false);
         }
@@ -66,7 +72,7 @@ public class JdbcKnowledgeSearch implements KnowledgeSearch {
         if (nodes == 0) {
             return new SearchResult(List.of(), false);
         }
-        List<SearchHit> hits = runSearch(STRICT_QUERY, tenantId, q, capped);
+        List<SearchHit> hits = runSearch(STRICT_QUERY, tenantId, q, capped, sourceKinds);
         if (!hits.isEmpty()) {
             return new SearchResult(hits, false);
         }
@@ -78,11 +84,18 @@ public class JdbcKnowledgeSearch implements KnowledgeSearch {
             return new SearchResult(List.of(), false);
         }
         String anyTerm = lexemes.stream().map(JdbcKnowledgeSearch::quoteLexeme).collect(Collectors.joining(" | "));
-        return new SearchResult(runSearch(ANY_TERM_QUERY, tenantId, anyTerm, capped), true);
+        return new SearchResult(runSearch(ANY_TERM_QUERY, tenantId, anyTerm, capped, sourceKinds), true);
     }
 
-    private List<SearchHit> runSearch(String tsqueryExpression, long tenantId, String q, int limit) {
-        return jdbc.sql(SEARCH_SQL.formatted(tsqueryExpression))
+    private List<SearchHit> runSearch(String tsqueryExpression, long tenantId, String q, int limit,
+            Set<String> sourceKinds) {
+        boolean byKind = sourceKinds != null && !sourceKinds.isEmpty();
+        JdbcClient.StatementSpec statement = jdbc
+                .sql(SEARCH_SQL.formatted(tsqueryExpression, byKind ? " AND s.kind IN (:kinds)" : ""));
+        if (byKind) {
+            statement = statement.param("kinds", List.copyOf(sourceKinds));
+        }
+        return statement
                 .param("q", q)
                 .param("tenant", tenantId)
                 .param("limit", limit)

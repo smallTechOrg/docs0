@@ -39,7 +39,7 @@ class SlackGatewayTest {
     @Test
     void reportsOffAndStaysIdleWithoutTokens() {
         Docs0Properties props = props("", "");
-        SlackGateway gateway = new SlackGateway(props, new BoltSlackMessenger(props), null, null);
+        SlackGateway gateway = new SlackGateway(props, new BoltSlackMessenger(props), null, null, null);
 
         gateway.start();
 
@@ -51,7 +51,7 @@ class SlackGatewayTest {
     @Test
     void reportsDownUntilConnectedWhenTokensAreSet() {
         Docs0Properties props = props("xoxb-test", "xapp-test");
-        SlackGateway gateway = new SlackGateway(props, new BoltSlackMessenger(props), null, null);
+        SlackGateway gateway = new SlackGateway(props, new BoltSlackMessenger(props), null, null, null);
 
         // Not started: status() itself never calls Slack.
         assertThat(gateway.status().name()).isEqualTo("Slack");
@@ -67,7 +67,8 @@ class SlackGatewayTest {
             context.registerBean(SlackFakes.FakeAgent.class);
             context.registerBean(SlackFakes.FakeKnowledge.class);
             context.registerBean(SlackFakes.FakeLlm.class);
-            context.register(com.docs0.tenant.TenantService.class, com.docs0.budget.BudgetService.class,
+            context.registerBean(ActionHandler.class, () -> new ActionHandler(null, null, null));
+            context.register(com.docs0.action.PendingActionRepository.class, com.docs0.tenant.TenantService.class, com.docs0.budget.BudgetService.class,
                     com.docs0.conversation.ConversationRepository.class,
                     com.docs0.conversation.InteractionRepository.class,
                     com.docs0.feedback.FeedbackRepository.class, com.docs0.feedback.CorrectionRepository.class,
@@ -190,5 +191,39 @@ class SlackGatewayTest {
                 "message.channels", "message.groups", "message.im", "message.mpim", "reaction_added", "reaction_removed");
         assertThat(settings).containsEntry("socket_mode_enabled", true);
         assertThat(interactivity).containsEntry("is_enabled", true);
+    }
+
+    private static com.slack.api.app_backend.interactive_components.payload.BlockActionPayload click(
+            String channel, String messageTs, String threadTs, String actionId, String value) {
+        var payload = new com.slack.api.app_backend.interactive_components.payload.BlockActionPayload();
+        var user = new com.slack.api.app_backend.interactive_components.payload.BlockActionPayload.User();
+        user.setId("U1");
+        payload.setUser(user);
+        var action = new com.slack.api.app_backend.interactive_components.payload.BlockActionPayload.Action();
+        action.setActionId(actionId);
+        action.setValue(value);
+        payload.setActions(List.of(action));
+        var container = new com.slack.api.app_backend.interactive_components.payload.BlockActionPayload.Container();
+        container.setChannelId(channel);
+        container.setMessageTs(messageTs);
+        container.setThreadTs(threadTs);
+        payload.setContainer(container);
+        return payload;
+    }
+
+    @Test
+    void mapsAClickOnADraftButtonToTheClickerTheMessageAndTheDraftId() {
+        var click = SlackGateway.fromDraftClick(click("C1", "9000.2", "100.1", "draft_create", "42"));
+
+        assertThat(click).isEqualTo(new SlackGateway.DraftClick("C1", "9000.2", "100.1", "U1", "draft_create", "42"));
+    }
+
+    @Test
+    void aDraftClickInAnUnthreadedDmHasNoThreadAndANullPayloadIsIgnored() {
+        assertThat(SlackGateway.fromDraftClick(click("D1", "9000.2", null, "draft_cancel", "7")))
+                .isEqualTo(new SlackGateway.DraftClick("D1", "9000.2", null, "U1", "draft_cancel", "7"));
+        assertThat(SlackGateway.fromDraftClick(null)).isNull();
+        assertThat(SlackGateway.fromDraftClick(
+                new com.slack.api.app_backend.interactive_components.payload.BlockActionPayload())).isNull();
     }
 }

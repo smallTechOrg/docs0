@@ -40,17 +40,28 @@ final class SlackFakes {
         volatile boolean rejectBlocks;
         volatile boolean rejectAllUpdates;
         volatile boolean postsFail;
+        /** When set, a post whose text matches is rejected by Slack; other posts go through. */
+        volatile java.util.function.Predicate<String> failPostWhen;
         final java.util.Map<String, String> names = new java.util.concurrent.ConcurrentHashMap<>();
         volatile boolean nameLookupFails;
 
         @Override
         public String postMessage(String channel, String threadTs, String text, List<LayoutBlock> blocks) {
-            if (postsFail) {
+            if (postsFail || (failPostWhen != null && failPostWhen.test(text))) {
                 throw new SlackCallException("chat.postMessage", "channel_not_found", null);
             }
             String ts = "9000.%04d".formatted(nextTs.incrementAndGet());
             posts.add(new Posted(channel, threadTs, text, blocks, ts));
             return ts;
+        }
+
+        record Ephemeral(String channel, String threadTs, String user, String text) {}
+
+        final List<Ephemeral> ephemerals = new CopyOnWriteArrayList<>();
+
+        @Override
+        public void postEphemeral(String channel, String threadTs, String user, String text) {
+            ephemerals.add(new Ephemeral(channel, threadTs, user, text));
         }
 
         @Override

@@ -128,6 +128,22 @@ public class DocumentStore {
                 .single();
     }
 
+    /** Live documents of the tenant by source kind, e.g. {@code GOOGLE_DRIVE -> 12}. Kinds with none are absent. */
+    public Map<String, Long> countsByKind(long tenantId) {
+        Map<String, Long> counts = new java.util.TreeMap<>();
+        jdbc.sql("""
+                        SELECT s.kind, count(*) AS n FROM document d
+                        JOIN source s ON s.id = d.source_id AND s.tenant_id = d.tenant_id
+                        WHERE d.tenant_id = :tenant AND NOT d.deleted
+                        GROUP BY s.kind
+                        """)
+                .param("tenant", tenantId)
+                .query(rs -> {
+                    counts.put(rs.getString("kind"), rs.getLong("n"));
+                });
+        return counts;
+    }
+
     private static String clean(String text) {
         return text == null ? "" : stripNul(text);
     }

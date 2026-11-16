@@ -48,6 +48,17 @@ public class BoltSlackMessenger implements SlackMessenger {
     }
 
     @Override
+    public void postEphemeral(String channel, String threadTs, String user, String text) {
+        call("chat.postEphemeral", () -> client.chatPostEphemeral(r -> {
+            r.channel(channel).user(user).text(text);
+            if (threadTs != null) {
+                r.threadTs(threadTs);
+            }
+            return r;
+        }));
+    }
+
+    @Override
     public void updateMessage(String channel, String ts, String text, List<LayoutBlock> blocks) {
         call("chat.update", () -> client.chatUpdate(r -> {
             r.channel(channel).ts(ts).text(text);

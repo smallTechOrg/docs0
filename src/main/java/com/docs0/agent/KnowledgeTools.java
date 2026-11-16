@@ -11,9 +11,12 @@ import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.Collections;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
+import java.util.Locale;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -28,6 +31,10 @@ final class KnowledgeTools {
     static final String READ = "read_document";
     static final String RECENT = "list_recent_documents";
     static final String SUBMIT = "submit_answer";
+
+    static final List<String> SOURCE_KINDS = List.of("GOOGLE_DRIVE", "LINEAR", "TRELLO");
+    private static final Map<String, String> SOURCE_NAMES =
+            Map.of("GOOGLE_DRIVE", "Drive", "LINEAR", "Linear", "TRELLO", "Trello");
 
     static final int PAGE_CHARS = 60_000;
     static final int SEARCH_DEFAULT_LIMIT = 8;
@@ -52,7 +59,8 @@ final class KnowledgeTools {
     static final List<ToolSpec> SPECS = List.of(
             new ToolSpec(
                     SEARCH,
-                    "Keyword search over the company's documents, best match first. Use this first for any "
+                    "Keyword search over the company's documents, Linear issues, projects and documents, and "
+                            + "Trello cards and boards, best match first. Use this first for any "
                             + "question, and again with different wording before concluding something is not "
                             + "written down. Returns for each hit a document_id, title, source, modified date, "
                             + "owner, url and a short snippet. Snippets are for choosing what to read, not for "
@@ -65,7 +73,13 @@ final class KnowledgeTools {
                                             + "appear in the document, e.g. \"pricing 2026\" or \"parental leave\"."),
                             "limit", obj(
                                     "type", "integer",
-                                    "description", "Maximum number of hits. Default 8, maximum 20.")),
+                                    "description", "Maximum number of hits. Default 8, maximum 20."),
+                            "source_kinds", obj(
+                                    "type", "array",
+                                    "description", "Optional. Only search these sources: GOOGLE_DRIVE for "
+                                            + "documents, LINEAR for issues, projects and Linear documents, "
+                                            + "TRELLO for cards and boards. Leave out to search everything.",
+                                    "items", obj("type", "string", "enum", SOURCE_KINDS))),
                     List.of("query"),
                     false),
             new ToolSpec(
@@ -190,10 +204,24 @@ final class KnowledgeTools {
             return badLimit;
         }
         int limit = clampLimit(asLong(input.get("limit")), SEARCH_DEFAULT_LIMIT);
+        Set<String> kinds = new LinkedHashSet<>();
+        if (input.get("source_kinds") != null) {
+            if (!(input.get("source_kinds") instanceof List<?> list)) {
+                return Output.error("\"source_kinds\" must be an array of " + String.join(", ", SOURCE_KINDS) + ".");
+            }
+            for (Object item : list) {
+                if (!(item instanceof String kind) || !SOURCE_KINDS.contains(kind.strip().toUpperCase(Locale.ROOT))) {
+                    return Output.error("\"source_kinds\" may only contain " + String.join(", ", SOURCE_KINDS) + ".");
+                }
+                kinds.add(kind.strip().toUpperCase(Locale.ROOT));
+            }
+        }
 
-        progress.onStatus("Searching for “" + shorten(query, 80) + "”…");
-        KnowledgeSearch.SearchResult result = knowledge.search(tenantId, audience, query, limit);
-        log.info("search_knowledge tenant={} hits={} broadened={}", tenantId, result.hits().size(), result.broadened());
+        String where = kinds.isEmpty() ? "" : String.join(" and ", kinds.stream().map(SOURCE_NAMES::get).toList()) + " ";
+        progress.onStatus("Searching " + where + "for “" + shorten(query, 80) + "”…");
+        KnowledgeSearch.SearchResult result = knowledge.search(tenantId, audience, query, limit, kinds);
+        log.info("search_knowledge tenant={} hits={} broadened={} kinds={}", tenantId, result.hits().size(),
+                result.broadened(), kinds);
 
         if (result.hits().isEmpty()) {
             return Output.ok("No documents matched \"" + query + "\", even after broadening the search to match "

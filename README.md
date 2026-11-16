@@ -7,8 +7,9 @@ docs0 does not use vector search or embeddings. Claude searches a keyword index,
 whole documents, and answers only from what it read. Every quote in an answer is checked
 against the source document before it is shown.
 
-**Status:** Phase 1 — answers from Google Drive. Linear, Trello, Grain, Slack history and
-Gmail follow, one phase at a time. See [spec/roadmap.md](spec/roadmap.md).
+**Status:** Phase 3 — answers from Google Drive, Linear and Trello, and can file a Linear issue
+or Trello card when asked (after the asker confirms). Grain, Slack history and Gmail follow,
+one phase at a time. See [spec/roadmap.md](spec/roadmap.md).
 
 ## What you need
 
@@ -19,6 +20,7 @@ Gmail follow, one phase at a time. See [spec/roadmap.md](spec/roadmap.md).
 - A Slack workspace where you can create an app
 - A Google account that can open the Drive folders you want indexed, and a Google Cloud
   project where you can create an OAuth client
+- Optional: a Linear workspace and a Trello account (see steps 4 and 5)
 
 ## Setup
 
@@ -81,14 +83,69 @@ as user `admin`; set it too whenever docs0 sits behind a proxy. If docs0 is not 
 `<DOCS0_PUBLIC_URL>/admin/sources/google/callback` as the redirect URI, and open the
 Sources page at that same address.
 
+### 4. Linear (optional)
+
+Linear needs no OAuth client and no new environment variable, only the `DOCS0_ENCRYPTION_KEY`
+from step 3. You paste a personal API key on the Sources page and docs0 stores it encrypted.
+
+1. In Linear open **Settings → Account → Security & access** and, under **Personal API
+   keys**, create a key. Copy it (it starts with `lin_api_`). The key can do what you can do
+   in Linear, so use the account of someone who can see the teams you want indexed and who is
+   allowed to create issues.
+2. Open <http://localhost:8080/admin/sources>, find **Linear**, paste the key and click
+   **Connect Linear**. docs0 tests the key with one call and stores it only if Linear accepts
+   it. The page then shows the workspace name; the key is never shown again.
+3. Tick the **teams** to include and click **Save**. Nothing is indexed until a team is
+   ticked. **Check access** shows how many issues docs0 can read per team; **Sync now**
+   starts a sync (otherwise it runs at startup and every 15 minutes).
+
+Indexed: every non-archived issue of the chosen teams (status, assignee, labels, priority,
+due date, project, cycle, description and the first 50 comments), the projects of those teams
+and the Linear documents attached to those projects. **Disconnect** deletes the stored key and
+removes Linear items from answers.
+
+### 5. Trello (optional)
+
+1. Open <https://trello.com/power-ups/admin>, choose **New** to make a Power-Up (any name),
+   then open its **API key** page and copy the **API key**.
+2. On that page choose to generate a **Token**, allow it, and copy it. It needs read **and
+   write** access: docs0 adds a card only when someone asks and confirms, but Trello's token
+   has no create-only scope.
+3. On the Sources page, under **Trello**, paste the key and the token and click **Connect
+   Trello**. docs0 tests them with one call, stores them encrypted, and shows the account.
+4. Tick the **boards** to include and **Save**, then **Sync now**.
+
+Indexed: for each chosen board a document with its description and its lists with card
+counts, and one document per open card (list, labels, members, due date, description,
+checklists with ✓ and ☐ items, and comments). docs0 stays under Trello's rate limit and backs
+off when Trello asks it to.
+
+### Creating issues and cards
+
+docs0 reads from Linear and Trello and never edits or deletes anything there. The one thing
+it writes is a **new** issue or card, and only like this:
+
+1. Someone asks in a thread, for example "@docs0 file a Linear issue for the Safari login bug,
+   high priority". docs0 only drafts when it is asked in the conversation; it never files on
+   its own.
+2. docs0 answers with what it drafted, and posts the **draft** in the thread: kind, where it
+   will go (Linear team, or Trello board and list), title and description, with **Create** and
+   **Cancel** buttons. Nothing exists in Linear or Trello yet.
+3. Only the person who asked can click. **Create** makes the item once (a double click makes
+   one) and replaces the draft with a link to it. **Cancel** drops it. A draft not confirmed
+   within an hour expires.
+
+The tools to draft are offered to the model only when that tool is connected and has a team
+or board chosen. If a create fails, docs0 says so and records the error; it does not retry.
+
 ## Run
 
 ```
 ./mvnw spring-boot:run
 ```
 
-Open <http://localhost:8080> for the status page: connection state for Slack, Anthropic
-and Drive, the document count, the last sync and this month's spend, with a link to the
+Open <http://localhost:8080> for the status page: connection state for Slack, Anthropic,
+Drive, Linear and Trello, the document count, the last sync and this month's spend, with a link to the
 Sources page. `/health` returns the same as JSON. The app starts even when a credential is missing; the status page says
 what is not set up.
 
@@ -107,6 +164,9 @@ what is not set up.
 - Approved corrections outrank documents. When one shapes an answer, docs0 says so, for
   example "per Arjun's correction on 2 Nov". A correction made in a DM is credited to
   "a teammate", never by name.
+
+- Ask about work in progress too: "what is the status of ENG-12?", "what is on the roadmap
+  board?". Linear issues and Trello cards are searched together with the documents.
 
 Each answer lists its sources with the exact passage it relied on. When docs0 is unsure
 it says so, asks a clarifying question, or names who might know.

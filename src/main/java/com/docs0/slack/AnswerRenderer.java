@@ -8,6 +8,8 @@ import static com.slack.api.model.block.composition.BlockCompositions.markdownTe
 import static com.slack.api.model.block.composition.BlockCompositions.plainText;
 import static com.slack.api.model.block.element.BlockElements.button;
 
+import com.docs0.action.ActionService;
+import com.docs0.action.PendingAction;
 import com.docs0.agent.Agent.AgentResult;
 import com.docs0.agent.Agent.Citation;
 import com.docs0.agent.Agent.Confidence;
@@ -25,6 +27,12 @@ public final class AnswerRenderer {
     /** Action ids of the follow-up buttons are this prefix plus 0, 1 or 2. The button value is the question. */
     public static final String FOLLOW_UP_ACTION_PREFIX = "follow_up_";
     public static final String FOLLOW_UP_BLOCK_ID = "follow_ups";
+
+    /** The Create and Cancel buttons of a draft. The button value is the draft's id. */
+    public static final String DRAFT_CREATE_ACTION = "draft_create";
+    public static final String DRAFT_CANCEL_ACTION = "draft_cancel";
+    public static final String DRAFT_BLOCK_ID = "draft_buttons";
+    static final int MAX_DRAFT_DESCRIPTION_CHARS = 600;
 
     static final String EMPTY_ANSWER = "I don't have an answer for that.";
     static final String LOW_CONFIDENCE = ":warning: *Low confidence* — please check the sources before relying on this.";
@@ -116,6 +124,55 @@ public final class AnswerRenderer {
         }
 
         return new Rendered(truncate(answer, MAX_SECTION_CHARS), List.copyOf(blocks));
+    }
+
+    /**
+     * A drafted Linear issue or Trello card, labelled as a draft, with Create and Cancel
+     * buttons. Nothing exists in the other tool until the asker clicks Create.
+     */
+    public static Rendered renderDraft(PendingAction draft) {
+        String noun = draft.kind() == PendingAction.Kind.LINEAR_ISSUE ? "Linear issue" : "Trello card";
+        StringBuilder text = new StringBuilder(":memo: *Draft " + noun + "* — not created yet\n");
+        text.append("*Title:* ").append(escape(truncate(draft.title(), MAX_TITLE_CHARS))).append('\n');
+        text.append("*Where:* ").append(escape(draft.target()));
+        if (draft.params().containsKey("priority")) {
+            text.append("\n*Priority:* ").append(escape(draft.params().get("priority")));
+        }
+        if (!isBlank(draft.description())) {
+            String excerpt = truncate(draft.description().strip().replaceAll("\\s*\\n\\s*", " "),
+                    MAX_DRAFT_DESCRIPTION_CHARS);
+            text.append("\n> ").append(escape(excerpt));
+        }
+        List<LayoutBlock> blocks = new ArrayList<>();
+        blocks.add(mrkdwnSection(truncate(text.toString(), MAX_SECTION_CHARS)));
+        String id = String.valueOf(draft.id());
+        blocks.add(actions(a -> a.blockId(DRAFT_BLOCK_ID).elements(List.of(
+                button(b -> b.actionId(DRAFT_CREATE_ACTION).text(plainText("Create", true)).value(id).style("primary")),
+                button(b -> b.actionId(DRAFT_CANCEL_ACTION).text(plainText("Cancel", true)).value(id))))));
+        blocks.add(context(List.of(markdownText("Only <@" + draft.requestedBy() + "> can create or cancel this. "
+                + "It expires after an hour."))));
+        return new Rendered("Draft " + noun + ": " + truncate(draft.title(), MAX_TITLE_CHARS), List.copyOf(blocks));
+    }
+
+    /** What replaces a draft once it has been dealt with. Never has buttons. */
+    public static Rendered renderDraftOutcome(ActionService.Outcome outcome) {
+        PendingAction draft = outcome.action();
+        String title = escape(truncate(draft == null ? "" : draft.title(), MAX_TITLE_CHARS)).replace("|", "¦");
+        String noun = draft != null && draft.kind() == PendingAction.Kind.TRELLO_CARD ? "Trello" : "Linear";
+        String text = switch (outcome.result()) {
+            case CREATED -> {
+                String label = outcome.identifier() != null && draft.kind() == PendingAction.Kind.LINEAR_ISSUE
+                        ? escape(outcome.identifier()) + ": " + title : title;
+                yield ":white_check_mark: *Created in " + noun + ":* <" + linkUrl(outcome.url()) + "|" + label + ">";
+            }
+            case CANCELLED -> ":no_entry_sign: Draft cancelled. Nothing was created in " + noun + ".";
+            case EXPIRED -> ":hourglass: This draft expired, so nothing was created in " + noun
+                    + ". Ask me again if you still want it.";
+            case FAILED -> "Sorry, I couldn't create that in " + noun + ". Nothing was created. "
+                    + "You can ask me to try again.";
+            default -> "This draft has already been dealt with.";
+        };
+        return new Rendered(text, List.of(mrkdwnSection(text)));
     }
 
     /** The Sources section: a heading, then each citation as a numbered link with its quote below. */

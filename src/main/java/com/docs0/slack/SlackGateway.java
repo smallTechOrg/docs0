@@ -38,12 +38,16 @@ public class SlackGateway implements StatusContributor {
     private static final Logger log = LoggerFactory.getLogger(SlackGateway.class);
     private static final Pattern FOLLOW_UP_ACTION =
             Pattern.compile("^" + Pattern.quote(AnswerRenderer.FOLLOW_UP_ACTION_PREFIX) + "\\d+$");
+    private static final Pattern DRAFT_ACTION = Pattern.compile("^(?:"
+            + Pattern.quote(AnswerRenderer.DRAFT_CREATE_ACTION) + "|"
+            + Pattern.quote(AnswerRenderer.DRAFT_CANCEL_ACTION) + ")$");
     private static final long RETRY_DELAY_MILLIS = 30_000;
 
     private final Docs0Properties props;
     private final BoltSlackMessenger messenger;
     private final QuestionHandler handler;
     private final ReactionHandler reactions;
+    private final ActionHandler draftActions;
 
     private volatile ComponentStatus status;
     private volatile SocketModeApp socketModeApp;
@@ -51,11 +55,12 @@ public class SlackGateway implements StatusContributor {
     private volatile boolean stopped;
 
     public SlackGateway(Docs0Properties props, BoltSlackMessenger messenger, QuestionHandler handler,
-            ReactionHandler reactions) {
+            ReactionHandler reactions, ActionHandler draftActions) {
         this.props = props;
         this.messenger = messenger;
         this.handler = handler;
         this.reactions = reactions;
+        this.draftActions = draftActions;
         this.status = configured()
                 ? ComponentStatus.down(NAME, "not connected yet")
                 : ComponentStatus.off(NAME, "no Slack tokens configured");
@@ -149,6 +154,11 @@ public class SlackGateway implements StatusContributor {
             return ctx.ack();
         });
 
+        app.blockAction(DRAFT_ACTION, (request, ctx) -> {
+            dispatch(() -> draftClick(request.getPayload()));
+            return ctx.ack();
+        });
+
         // Not questions: bot messages, edits, deletions, joins, file uploads, broadcasts.
         // Acknowledged here so Bolt does not report them as unhandled.
         app.event(MessageBotEvent.class, (payload, ctx) -> ctx.ack());
@@ -193,6 +203,37 @@ public class SlackGateway implements StatusContributor {
                 : container != null ? container.getThreadTs() : null;
         handler.followUp(channel, followUpThread(channel, threadTs, messageTs), payload.getUser().getId(),
                 action.getValue(), payload.getUser().getId() + ":" + messageTs + ":" + action.getActionTs());
+    }
+
+    /** A click on Create or Cancel under a draft. */
+    private void draftClick(BlockActionPayload payload) {
+        DraftClick click = fromDraftClick(payload);
+        if (click != null) {
+            draftActions.handle(click.channel(), click.messageTs(), click.threadTs(), click.user(),
+                    click.actionId(), click.value());
+        }
+    }
+
+    /** What a click on a draft's button carries. {@code threadTs} is null for an unthreaded DM. */
+    record DraftClick(String channel, String messageTs, String threadTs, String user, String actionId, String value) {}
+
+    /** Reads a button click payload. Null when it carries no action or no user. */
+    static DraftClick fromDraftClick(BlockActionPayload payload) {
+        if (payload == null || payload.getActions() == null || payload.getActions().isEmpty()
+                || payload.getUser() == null) {
+            return null;
+        }
+        BlockActionPayload.Action action = payload.getActions().get(0);
+        BlockActionPayload.Container container = payload.getContainer();
+        String channel = payload.getChannel() != null ? payload.getChannel().getId()
+                : container != null ? container.getChannelId() : null;
+        String messageTs = payload.getMessage() != null ? payload.getMessage().getTs()
+                : container != null ? container.getMessageTs() : null;
+        String threadTs = payload.getMessage() != null && payload.getMessage().getThreadTs() != null
+                ? payload.getMessage().getThreadTs()
+                : container != null ? container.getThreadTs() : null;
+        return new DraftClick(channel, messageTs, followUpThread(channel, threadTs, messageTs),
+                payload.getUser().getId(), action.getActionId(), action.getValue());
     }
 
     // ---- mapping Slack payloads to handler events (pure) --------------------------------------

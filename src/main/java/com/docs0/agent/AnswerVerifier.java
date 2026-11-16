@@ -63,6 +63,15 @@ public final class AnswerVerifier {
             int droppedCitations) {}
 
     public Verified verify(Draft draft, long tenantId, Audience audience) {
+        return verify(draft, tenantId, audience, false);
+    }
+
+    /**
+     * As {@link #verify(Draft, long, Audience)}. When {@code drafted} is true the reply
+     * announces a drafted issue or card, which no document supports, so lacking citations
+     * is not a reason to mark it unverified.
+     */
+    public Verified verify(Draft draft, long tenantId, Audience audience, boolean drafted) {
         List<DraftCitation> submitted = draft.citations() == null ? List.of() : draft.citations();
 
         // Position i holds the document when citation i+1 is valid, else null.
@@ -96,7 +105,7 @@ public final class AnswerVerifier {
         citations.sort(Comparator.comparingInt(Citation::index));
 
         Confidence confidence = draft.confidence() == null ? Confidence.LOW : draft.confidence();
-        if (draft.kind() == Kind.ANSWER && citations.isEmpty()) {
+        if (draft.kind() == Kind.ANSWER && citations.isEmpty() && !drafted) {
             confidence = Confidence.LOW;
             answer = answer.isEmpty() ? UNVERIFIED_NOTE : answer + "\n\n" + UNVERIFIED_NOTE;
         }

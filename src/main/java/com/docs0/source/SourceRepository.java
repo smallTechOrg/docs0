@@ -95,4 +95,32 @@ public class SourceRepository {
                 .param("source", sourceId)
                 .update();
     }
+
+    /** One list stored in {@code source.config}, as JSON text ({@code []} when there is none). */
+    public String configList(long tenantId, long sourceId, String key) {
+        return jdbc.sql("""
+                        SELECT CAST(coalesce(s.config -> CAST(:key AS text), '[]'::jsonb) AS text)
+                        FROM source s WHERE s.tenant_id = :tenant AND s.id = :source
+                        """)
+                .param("key", key)
+                .param("tenant", tenantId)
+                .param("source", sourceId)
+                .query(String.class)
+                .optional()
+                .orElse("[]");
+    }
+
+    /** Replaces one list in {@code source.config}; the other keys are kept. */
+    public void setConfigList(long tenantId, long sourceId, String key, String json) {
+        jdbc.sql("""
+                        UPDATE source s
+                        SET config = jsonb_set(s.config, ARRAY[CAST(:key AS text)], CAST(:json AS jsonb), TRUE)
+                        WHERE s.tenant_id = :tenant AND s.id = :source
+                        """)
+                .param("key", key)
+                .param("json", json)
+                .param("tenant", tenantId)
+                .param("source", sourceId)
+                .update();
+    }
 }

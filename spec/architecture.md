@@ -34,6 +34,8 @@ src/main/java/com/docs0/
   knowledge/                    Document model, DocumentRepository (upsert, search, read)
   source/                       SourceConnector SPI, SyncService, SyncRun log
   source/drive/                 DriveClient, DriveConnector, text extraction
+  source/linear/, source/trello/  LinearClient/TrelloClient (network edge), connection, connector, rendering
+  action/                       PendingAction, drafts repository, ActionService (the only writes)
   budget/                       BudgetService: hard monthly spend cap
   agent/                        AgentService (tool loop), tools, AnswerVerifier, LlmClient
   conversation/                 Conversation + Interaction log
@@ -58,8 +60,8 @@ src/test/java/com/docs0/        mirrors main
 - **Degraded boot.** The app must start with any external credential missing. A missing
   Slack, Drive or Anthropic credential disables that integration and shows on the status
   page; it never crashes startup.
-- **Network edges behind interfaces.** `LlmClient`, `DriveClient` and `SlackMessenger`
-  are interfaces so tests substitute fakes. Everything else is tested for real.
+- **Network edges behind interfaces.** `LlmClient`, `DriveClient`, `LinearClient`, `TrelloClient`
+  and `SlackMessenger` are interfaces so tests substitute fakes. Everything else is tested for real.
 - **One LLM loop per question.** Never call the model per document, per line or per
   token of output.
 - **Run command.** `./mvnw spring-boot:run` from the repo root. Port from
@@ -79,8 +81,10 @@ src/test/java/com/docs0/        mirrors main
   synced_at)` — unique on `(tenant_id, source_id, external_id)`. `search` is a generated
   column: title weighted A, body weighted B. GIN index on `search`.
 - `source_credential(id, tenant_id, source_id UNIQUE, account_email, encrypted_refresh_token,
-  created_at)` — the Google grant for a source. The token is AES-256-GCM encrypted with
-  `DOCS0_ENCRYPTION_KEY`; it is never logged or shown.
+  encrypted_secret, created_at)` — the stored secret of a source. Google keeps its refresh token
+  in `encrypted_refresh_token`; Linear and Trello keep encrypted JSON in `encrypted_secret`
+  (Phase 3); at least one is set. `account_email` is the display name of the account. Everything
+  is AES-256-GCM encrypted with `DOCS0_ENCRYPTION_KEY`; it is never logged or shown.
 - `sync_run(id, tenant_id, source_id, started_at, finished_at, status, added, updated,
   removed, skipped, failed, error)`
 - `conversation(id, tenant_id, channel_id, thread_ts, is_dm, created_at)` — unique on
@@ -101,6 +105,16 @@ Phase 2 adds:
 - `feedback_prompt(id, tenant_id, conversation_id, interaction_id UNIQUE, created_at,
   cleared_at)` — a thread waiting for a correction.
 - `interaction.correction_ids jsonb` — approved corrections shown to the model for that answer.
+
+Phase 3 adds:
+
+- `source.kind` values `LINEAR` (config `{"teams":[{id,key,name}]}`) and `TRELLO` (config
+  `{"boards":[{id,name}]}`), both `SHARED`.
+- `pending_action(id, tenant_id, conversation_id, interaction_id nullable, requested_by_slack_id,
+  kind LINEAR_ISSUE|TRELLO_CARD, params jsonb, status PENDING|DONE|CANCELLED|EXPIRED|FAILED,
+  result_url, error, created_at, resolved_at)` — an issue or card drafted for the asker to
+  confirm. `DONE` is set when the confirm click claims the draft, just before the item is
+  created; `result_url` is filled when it exists, and a failed create becomes `FAILED`.
 
 Later phases add `principal`/ACL tables and channel settings.
 

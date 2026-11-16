@@ -73,7 +73,7 @@ clarifying questions, honest "I don't know", suggested people, conflict handling
 
 ## C4. Status page (Phase 1)
 
-`/` shows: a link to the Sources page; Slack, Anthropic and Drive connection state with the reason when one is off;
+`/` shows: a link to the Sources page; Slack, Anthropic, Drive, Linear and Trello connection state with the reason when one is off;
 document count; last sync run; number of questions answered. `/health` returns JSON
 `{"status":"UP", ...}` with the same component states. No secrets are shown.
 
@@ -105,14 +105,56 @@ questions this month). Questions asked in a DM are shown anonymously in the unha
 answers list and on the Costs page. The status page shows how many corrections are pending.
 (Later: insights.)
 
-Connecting Google Drive from the dashboard is delivered in Phase 1 (C2). Later sources get
-the same connect, check access and sync-now treatment.
+Connecting Google Drive from the dashboard is delivered in Phase 1 (C2); Linear and Trello
+(Phase 3, C7) have their own sections on the same page, and the page shows document counts per
+source kind. Later sources get the same connect, check access and sync-now treatment.
 
 ## C7. Linear and Trello (Phase 3)
 
-Sync issues, projects, boards and cards as shared knowledge. On an explicit request in a
-thread, docs0 creates a new Linear issue or Trello card and links it. It never edits or
-deletes.
+Linear issues, projects and documents and Trello boards and cards are shared knowledge, in
+the same index as Drive. docs0 can also create one new Linear issue or Trello card from a
+Slack thread, only after the asker confirms. It never edits or deletes anything in either tool.
+
+- **Connect.** On the Sources page the admin pastes a Linear personal API key (`lin_api_…`)
+  or a Trello API key and token. docs0 tests them with one call and stores them only if the
+  tool accepts them, AES-256-GCM encrypted per tenant (`DOCS0_ENCRYPTION_KEY`) in
+  `source_credential.encrypted_secret`. They are never logged or shown again; the page shows
+  that a key is set and the workspace or account name the test call returned. No new
+  environment variable is needed.
+- **Choose.** Teams (Linear) or boards (Trello) are ticked from a list fetched with the
+  credentials and saved in `source.config` as `{"teams":[{id,key,name}]}` or
+  `{"boards":[{id,name}]}`. Nothing is indexed until at least one is chosen; clearing the
+  selection removes what was indexed.
+- **Check access, Sync now, Disconnect** work as for Drive: counts of issues or cards found
+  for the selection (capped at 2,000), an asynchronous sync, and a disconnect that deletes the
+  secret and marks the source's documents deleted. The last five sync runs are listed.
+  Syncs also run at startup and every 15 minutes. Document counts per source kind are shown
+  on the Sources page.
+- **Documents.** One document per Linear issue (`issue:<id>`, title `ENG-12: <title>`),
+  project (`project:<id>`) and Linear document (`doc:<id>`, only those attached to a project
+  of a chosen team); one per Trello card (`card:<id>`) and per board (`board:<id>`, with its
+  description and its lists with card counts). The text starts with labelled fields (Status,
+  Assignee, Project, Labels, Priority, Due; for cards Board, List, Labels, Members, Due) and
+  continues with the description, checklists (✓ / ☐) and comments. Owner is the assignee
+  (else creator or lead) or the first card member; modified time is `updatedAt` or
+  `dateLastActivity`. Unchanged items are not rewritten.
+- **Failures.** A rejected key or token fails the run with "Linear rejected the API key.
+  Reconnect Linear on the Sources page." or "Trello rejected the key or token. Reconnect
+  Trello on the Sources page." and deletes nothing. Rate limits are waited out a bounded
+  number of times, then the run fails and deletes nothing. A board that cannot be read fails
+  the run naming the board. One item that cannot be rendered is counted as failed and keeps its
+  stored copy.
+- **Status page.** Components `Linear` and `Trello`: OFF "not connected — connect it on the
+  Sources page" / OFF "connected, nothing chosen yet" / DOWN with the last failure / UP with
+  document count and last sync.
+- **Creating.** When a source is connected with something chosen, the model gets
+  `list_linear_teams` / `create_linear_issue` or `list_trello_boards_and_lists` /
+  `create_trello_card`. A create tool only stores a `pending_action` row. docs0 then posts a
+  draft in the thread (kind, target, title, description excerpt) with **Create** and
+  **Cancel** buttons. Only the person who asked can click; a draft older than an hour is
+  expired; a double click creates exactly one item; success replaces the draft with a link,
+  failure shows a plain apology and records the error on the row. Creation is the only write
+  docs0 makes (`issueCreate`, `POST /cards`).
 
 ## C8. Grain and Slack history (Phase 4)
 

@@ -1,5 +1,6 @@
 package com.docs0.agent;
 
+import com.docs0.action.PendingAction;
 import com.docs0.agent.AnswerVerifier.Draft;
 import com.docs0.agent.AnswerVerifier.DraftCitation;
 import com.docs0.agent.AnswerVerifier.Verified;
@@ -52,12 +53,13 @@ public class AgentService implements Agent, StatusContributor {
     private final KnowledgeTools tools;
     private final AnswerVerifier verifier;
     private final CorrectionSource corrections;
+    private final ActionTools actions;
     private final Clock clock;
 
     @Autowired
     public AgentService(LlmClient llm, KnowledgeSearch knowledge, Docs0Properties properties,
-            CorrectionSource corrections) {
-        this(llm, knowledge, properties, corrections, Clock.systemUTC());
+            CorrectionSource corrections, ActionTools actions) {
+        this(llm, knowledge, properties, corrections, actions, Clock.systemUTC());
     }
 
     AgentService(LlmClient llm, KnowledgeSearch knowledge, Docs0Properties properties, Clock clock) {
@@ -66,7 +68,13 @@ public class AgentService implements Agent, StatusContributor {
 
     AgentService(LlmClient llm, KnowledgeSearch knowledge, Docs0Properties properties, CorrectionSource corrections,
             Clock clock) {
+        this(llm, knowledge, properties, corrections, ActionTools.NONE, clock);
+    }
+
+    AgentService(LlmClient llm, KnowledgeSearch knowledge, Docs0Properties properties, CorrectionSource corrections,
+            ActionTools actions, Clock clock) {
         this.corrections = corrections;
+        this.actions = actions;
         this.llm = llm;
         this.settings = properties.anthropic();
         this.tools = new KnowledgeTools(knowledge);
@@ -109,7 +117,9 @@ public class AgentService implements Agent, StatusContributor {
 
     private AgentResult loop(AgentRequest request, Run run) {
         int maxSteps = Math.max(1, settings.maxSteps());
-        LlmSession session = llm.start(SystemPrompt.TEXT, KnowledgeTools.SPECS);
+        List<LlmClient.ToolSpec> specs = new ArrayList<>(KnowledgeTools.SPECS);
+        specs.addAll(actions.specs(request.tenantId()));
+        LlmSession session = llm.start(SystemPrompt.TEXT, specs);
 
         List<CorrectionSource.ApprovedCorrection> approved = approvedCorrections(request);
         run.correctionIds = approved.stream().map(CorrectionSource.ApprovedCorrection::id).toList();
@@ -127,7 +137,7 @@ public class AgentService implements Agent, StatusContributor {
                     // Plain text instead of submit_answer: an unverified, low-confidence answer.
                     Draft draft = new Draft(
                             Kind.ANSWER, turn.text().strip(), Confidence.LOW, List.of(), List.of(), List.of());
-                    return run.finish(verifier.verify(draft, request.tenantId(), request.audience()));
+                    return run.finish(verifier.verify(draft, request.tenantId(), request.audience(), !run.drafts.isEmpty()));
                 }
                 case MAX_TOKENS -> {
                     return run.error("max_tokens: the model's reply was cut off at the output limit");
@@ -151,12 +161,14 @@ public class AgentService implements Agent, StatusContributor {
                     Object parsed = parseSubmission(call.input());
                     if (parsed instanceof Draft draft) {
                         run.progress("Writing the answer\u2026");
-                        return run.finish(verifier.verify(draft, request.tenantId(), request.audience()));
+                        return run.finish(verifier.verify(draft, request.tenantId(), request.audience(), !run.drafts.isEmpty()));
                     }
                     results.add(new ToolResult(call.id(), (String) parsed, true));
                 } else if (!lastTurn) {
-                    KnowledgeTools.Output output = tools.run(
-                            call.name(), call.input(), request.tenantId(), request.audience(), run::progress);
+                    KnowledgeTools.Output output = actions.handles(call.name())
+                            ? actions.run(call.name(), call.input(), request, run::progress, run.drafts)
+                            : tools.run(call.name(), call.input(), request.tenantId(), request.audience(),
+                                    run::progress);
                     results.add(new ToolResult(call.id(), output.content(), output.isError()));
                 }
             }
@@ -282,6 +294,7 @@ public class AgentService implements Agent, StatusContributor {
         private long inputTokens;
         private long outputTokens;
         private List<Long> correctionIds = List.of();
+        private final List<PendingAction> drafts = new ArrayList<>();
 
         Run(ProgressListener listener) {
             this.listener = listener;
@@ -318,7 +331,7 @@ public class AgentService implements Agent, StatusContributor {
             long durationMs = (System.nanoTime() - startedNanos) / 1_000_000;
             return new AgentResult(
                     kind, answer, confidence, citations, followUps, suggestedPeople, steps, inputTokens,
-                    outputTokens, cost(), durationMs, error, correctionIds);
+                    outputTokens, cost(), durationMs, error, correctionIds, List.copyOf(drafts));
         }
 
         private BigDecimal cost() {
