@@ -117,7 +117,7 @@ describe_env() {
 
 step_wif() {
   note "step: wif (one-time; run by someone allowed to administer IAM, not by the workflow): lets GitHub Actions of $GITHUB_REPO deploy without a key"
-  run "gcloud iam workload-identity-pools providers describe docs0-github --workload-identity-pool github --location global --project $PROJECT >/dev/null 2>&1 || gcloud iam workload-identity-pools providers create-oidc docs0-github --workload-identity-pool github --location global --project $PROJECT --display-name 'docs0 GitHub Actions' --issuer-uri https://token.actions.githubusercontent.com --attribute-mapping 'google.subject=assertion.sub,attribute.repository=assertion.repository,attribute.ref=assertion.ref' --attribute-condition \"assertion.repository=='$GITHUB_REPO'\""
+  run "gcloud iam workload-identity-pools providers describe docs0-github --workload-identity-pool github --location global --project $PROJECT >/dev/null 2>&1 || gcloud iam workload-identity-pools providers create-oidc docs0-github --workload-identity-pool github --location global --project $PROJECT --display-name 'docs0 GitHub Actions' --issuer-uri https://token.actions.githubusercontent.com --attribute-mapping 'google.subject=assertion.sub,attribute.repository=assertion.repository,attribute.ref=assertion.ref' --attribute-condition \"assertion.repository=='$GITHUB_REPO' && assertion.ref in ['refs/heads/main','refs/heads/feature/docs0-knowledge-agent-20261117-0148-v0.1']\""
   run "gcloud iam service-accounts add-iam-policy-binding $DEPLOYER_SA --project $PROJECT --role roles/iam.workloadIdentityUser --member 'principalSet://iam.googleapis.com/projects/$PROJECT_NUMBER/locations/global/workloadIdentityPools/github/attribute.repository/$GITHUB_REPO' >/dev/null"
 }
 
