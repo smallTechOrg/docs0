@@ -51,3 +51,22 @@ Run started: 2026-11-17 01:24 IST.
   set (the app's own status page), not just "never open .env".
 - **Model switched mid-run (Fable to Sonnet 5.5) at the owner's request.** Context carried
   over through the transcript; no rework needed.
+- **Unattended overnight run (owner asleep, told to continue through all phases).** Phases 2–7b
+  were each built by one worker and verified by the root (clean full build, test count from
+  surefire reports, real-key live checks for the answer path, corrections, classifier and
+  repeat-question judge). Lesson: the pattern that worked was one worker per phase with a
+  precise brief, a fixed gate, and the root re-running the gate and live checks itself.
+- **Validated external API shapes where a public schema existed.** Linear's GraphQL schema
+  is public; all queries and the create mutation were validated against it with a GraphQL
+  validator. Trello, Grain, Gmail and Slack shapes could only be checked against docs or
+  local fakes. Lesson: when a vendor publishes a schema, validate against it in the gate.
+- **Keyword-only retrieval limits repeat-question matching.** A paraphrase with no shared
+  words ("PTO" vs "vacation days") is never matched. Accepted trade-off for "no vector RAG".
+- **Independent audits found real issues the build gates did not.** A security review and a
+  docs/correctness review of the final tree found a public-channel leak of private
+  documents, a Gmail key SSRF vector, admin sessions outliving removal, unbudgeted model
+  calls, and page-cap truncation that could drive deletion. All fixed with tests. Lesson:
+  run an independent audit before declaring done; the author's tests do not cover what the
+  author did not think of.
+- **Parallel isolated worktrees started from the wrong commit** (see earlier entry); later
+  phases ran sequentially in the main tree, which avoided merge work entirely.
