@@ -5,6 +5,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import org.slf4j.Logger;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
@@ -18,20 +19,30 @@ public class SyncService {
     private final TenantService tenants;
     private final SourceRepository sources;
     private final SyncRunRepository runs;
+    /** Across processes; null only in tests that never need it. */
+    private final SyncLock lock;
     /** A source being synced. Keyed by tenant as well as source, so no two tenants can ever share a guard. */
     private record RunKey(long tenantId, long sourceId) {}
 
     /** Sources being synced right now. One app instance, so an in-process guard is enough. */
     private final Set<RunKey> running = ConcurrentHashMap.newKeySet();
 
-    public SyncService(TenantService tenants, SourceRepository sources, SyncRunRepository runs) {
+    @Autowired
+    public SyncService(TenantService tenants, SourceRepository sources, SyncRunRepository runs, SyncLock lock) {
         this.tenants = tenants;
         this.sources = sources;
         this.runs = runs;
+        this.lock = lock;
     }
 
-    /** A run that has been recorded as started and holds the guard of its source. */
-    private record Started(SourceConnector connector, long tenantId, Source source, long runId) {}
+    /** Without the cross-process lock: the in-process guard only. */
+    public SyncService(TenantService tenants, SourceRepository sources, SyncRunRepository runs) {
+        this(tenants, sources, runs, null);
+    }
+
+    /** A run that has been recorded as started and holds the guard and the lock of its source. */
+    private record Started(SourceConnector connector, long tenantId, Source source, long runId,
+            SyncLock.Held held) {}
 
     /**
      * Syncs one source of the tenant and returns the finished run (OK or FAILED). Returns empty, without
@@ -58,9 +69,13 @@ public class SyncService {
         return started.isPresent();
     }
 
-    /** True while a sync of this tenant's source is in progress in this app instance. */
+    /**
+     * True while a sync of this tenant's source is in progress: in this process, or (a Cloud Run Job syncs in
+     * another process) a run row says RUNNING and began less than {@link SyncRunRepository#STALE_AFTER} ago. A RUNNING
+     * row older than that was left by a process that died; it shows as Interrupted and is kept.
+     */
     public boolean isRunning(long tenantId, long sourceId) {
-        return running.contains(new RunKey(tenantId, sourceId));
+        return running.contains(new RunKey(tenantId, sourceId)) || runs.hasRunning(tenantId, sourceId);
     }
 
     private Optional<Started> begin(long tenantId, SourceConnector connector) {
@@ -74,9 +89,22 @@ public class SyncService {
             log.info("Sync of source {} ({}) already running, skipping", source.id(), source.name());
             return Optional.empty();
         }
+        SyncLock.Held held = null;
         try {
-            return Optional.of(new Started(connector, tenantId, source, runs.start(tenantId, source.id())));
+            if (lock != null) {
+                held = lock.tryLock(tenantId, source.id());
+                if (held == null) {
+                    running.remove(key);
+                    log.info("Sync of source {} ({}) skipped: another process is syncing it", source.id(),
+                            source.name());
+                    return Optional.empty();
+                }
+            }
+            return Optional.of(new Started(connector, tenantId, source, runs.start(tenantId, source.id()), held));
         } catch (RuntimeException e) {
+            if (held != null) {
+                held.close();
+            }
             running.remove(key);
             throw e;
         }
@@ -100,6 +128,9 @@ public class SyncService {
             return finished;
         } finally {
             running.remove(new RunKey(tenantId, source.id()));
+            if (started.held() != null) {
+                started.held().close();
+            }
         }
     }
 

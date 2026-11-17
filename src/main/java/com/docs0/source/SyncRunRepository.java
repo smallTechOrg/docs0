@@ -23,6 +23,9 @@ public class SyncRunRepository {
                     rs.getInt("failed")),
             rs.getString("error"));
 
+    /** A run still marked RUNNING after this long was left behind by a process that died. */
+    public static final java.time.Duration STALE_AFTER = java.time.Duration.ofHours(3);
+
     private final JdbcClient jdbc;
 
     public SyncRunRepository(JdbcClient jdbc) {
@@ -60,6 +63,20 @@ public class SyncRunRepository {
                 .param("tenant", tenantId)
                 .param("id", runId)
                 .query(MAPPER)
+                .single();
+    }
+
+    /** True when a run of the source is marked RUNNING and began less than {@link #STALE_AFTER} ago (any process). */
+    public boolean hasRunning(long tenantId, long sourceId) {
+        return jdbc.sql("""
+                        SELECT EXISTS (SELECT 1 FROM sync_run
+                                       WHERE tenant_id = :tenant AND source_id = :source AND status = 'RUNNING'
+                                         AND started_at > now() - make_interval(secs => :stale))
+                        """)
+                .param("tenant", tenantId)
+                .param("source", sourceId)
+                .param("stale", (double) STALE_AFTER.toSeconds())
+                .query(Boolean.class)
                 .single();
     }
 

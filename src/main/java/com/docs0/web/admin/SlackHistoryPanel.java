@@ -103,7 +103,7 @@ public class SlackHistoryPanel {
         long count = 0;
         if (source.isPresent()) {
             for (SyncRun run : runs.recent(tenantId, source.get().id(), RECENT_RUNS)) {
-                rows.add(SourcesController.runRow(run, running));
+                rows.add(SourcesController.runRow(run, running && rows.isEmpty()));
             }
             count = documents.count(tenantId, source.get().id());
         }

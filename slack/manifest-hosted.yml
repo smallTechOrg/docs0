@@ -1,0 +1,54 @@
+# Slack app manifest for docs0 hosted on Cloud Run (single company, Slack events over HTTP, no Socket Mode).
+# Edit your EXISTING Slack app: https://api.slack.com/apps -> your app -> App Manifest -> paste this file -> Save.
+# Then: Basic Information -> App Credentials -> Signing Secret (this is DOCS0_SLACK_SIGNING_SECRET), and
+# Install App -> Reinstall to Workspace. No app-level token (xapp-) is needed any more.
+# Same bot scopes and bot events as manifest.yml; only the transport differs. Change docs0.smalltech.in below if the
+# service is served from another domain.
+display_information:
+  name: docs0
+  description: Answers questions from your company's docs, with sources.
+  background_color: "#1f2937"
+features:
+  app_home:
+    home_tab_enabled: false
+    messages_tab_enabled: true
+    messages_tab_read_only_enabled: false
+  bot_user:
+    display_name: docs0
+    always_online: true
+oauth_config:
+  scopes:
+    bot:
+      - app_mentions:read
+      - chat:write
+      - channels:history
+      - groups:history
+      - im:history
+      - mpim:history
+      - channels:read
+      - groups:read
+      - im:write
+      - mpim:read
+      - users:read
+      - users:read.email
+      - channels:join
+      - reactions:read
+settings:
+  event_subscriptions:
+    request_url: https://docs0.smalltech.in/slack/events
+    bot_events:
+      - app_mention
+      - message.channels
+      - message.groups
+      - message.im
+      - message.mpim
+      - reaction_added
+      - reaction_removed
+      - app_uninstalled
+      - tokens_revoked
+  interactivity:
+    is_enabled: true
+    request_url: https://docs0.smalltech.in/slack/interactions
+  org_deploy_enabled: false
+  socket_mode_enabled: false
+  token_rotation_enabled: false

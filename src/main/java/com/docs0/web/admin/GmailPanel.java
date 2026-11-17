@@ -88,7 +88,7 @@ public class GmailPanel {
         boolean running = syncService.isRunning(tenantId, sourceId);
         List<SourcesController.RunRow> rows = new ArrayList<>();
         for (SyncRun run : runs.recent(tenantId, sourceId, RECENT_RUNS)) {
-            rows.add(SourcesController.runRow(run, running));
+            rows.add(SourcesController.runRow(run, running && rows.isEmpty()));
         }
         Optional<GmailKey> account = connection.account(tenantId);
         return new Panel("connected", account.map(GmailKey::email).orElse(credential.get().accountName()),

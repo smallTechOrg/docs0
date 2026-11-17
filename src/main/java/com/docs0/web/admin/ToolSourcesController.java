@@ -2,6 +2,7 @@ package com.docs0.web.admin;
 
 import com.docs0.source.Source;
 import com.docs0.source.SourceAccessException;
+import com.docs0.job.SyncNow;
 import com.docs0.source.SyncService;
 import com.docs0.source.grain.GrainClient;
 import com.docs0.source.grain.GrainConnection;
@@ -53,13 +54,14 @@ public class ToolSourcesController {
     private final GrainClient grainClient;
     private final GrainConnector grainConnector;
     private final SyncService syncService;
+    private final SyncNow syncNow;
     private final ToolPanels panels;
 
     public ToolSourcesController(LinearConnection linear, LinearClient linearClient,
                                  LinearConnector linearConnector, TrelloConnection trello,
                                  TrelloClient trelloClient, TrelloConnector trelloConnector,
                                  GrainConnection grain, GrainClient grainClient, GrainConnector grainConnector,
-                                 SyncService syncService, ToolPanels panels) {
+                                 SyncService syncService, ToolPanels panels, SyncNow syncNow) {
         this.linear = linear;
         this.linearClient = linearClient;
         this.linearConnector = linearConnector;
@@ -70,6 +72,7 @@ public class ToolSourcesController {
         this.grainClient = grainClient;
         this.grainConnector = grainConnector;
         this.syncService = syncService;
+        this.syncNow = syncNow;
         this.panels = panels;
     }
 
@@ -157,9 +160,7 @@ public class ToolSourcesController {
         if (linear.credential(admin.tenantId()).isEmpty()) {
             return failed(flash, "Connect Linear first.", "linear");
         }
-        if (!syncService.startInBackground(admin.tenantId(), linearConnector)) {
-            flash.addFlashAttribute("notice", "A Linear sync is already running.");
-        }
+        syncNow.request(admin.tenantId(), linearConnector).flash(flash, "A Linear sync is already running.");
         return to("linear");
     }
 
@@ -267,9 +268,7 @@ public class ToolSourcesController {
         if (trello.credential(admin.tenantId()).isEmpty()) {
             return failed(flash, "Connect Trello first.", "trello");
         }
-        if (!syncService.startInBackground(admin.tenantId(), trelloConnector)) {
-            flash.addFlashAttribute("notice", "A Trello sync is already running.");
-        }
+        syncNow.request(admin.tenantId(), trelloConnector).flash(flash, "A Trello sync is already running.");
         return to("trello");
     }
 
@@ -338,9 +337,7 @@ public class ToolSourcesController {
         if (grain.credential(admin.tenantId()).isEmpty()) {
             return failed(flash, "Connect Grain first.", "grain");
         }
-        if (!syncService.startInBackground(admin.tenantId(), grainConnector)) {
-            flash.addFlashAttribute("notice", "A Grain sync is already running.");
-        }
+        syncNow.request(admin.tenantId(), grainConnector).flash(flash, "A Grain sync is already running.");
         return to("grain");
     }
 

@@ -156,7 +156,7 @@ step_deploy() {
 
 step_jobs() {
   note "step: jobs (Cloud Run Jobs from the SAME image the service runs; same env, same Direct VPC egress)"
-  note "$SYNC_JOB runs '--docs0.job=sync'; $DIGEST_JOB runs '--docs0.job=digest' (needs the job entrypoint from the code follow-up)"
+  note "$SYNC_JOB runs '--docs0.job=sync'; $DIGEST_JOB runs '--docs0.job=digest'"
   describe_env
   if [ "$APPLY" -eq 1 ]; then make_env_file; fi
   local name arg
@@ -170,6 +170,8 @@ step_jobs() {
     --env-vars-file \"\$ENVFILE\""
     run "gcloud run jobs add-iam-policy-binding $name --project $PROJECT --region $REGION --member=serviceAccount:$SA --role=roles/run.invoker >/dev/null"
   done
+  note "the service starts $SYNC_JOB with per-run arguments (Sync now); that needs run.jobs.runWithOverrides, which run.invoker lacks"
+  run "gcloud run jobs add-iam-policy-binding $SYNC_JOB --project $PROJECT --region $REGION --member=serviceAccount:$SA --role=roles/run.developer >/dev/null"
 }
 
 step_scheduler() {

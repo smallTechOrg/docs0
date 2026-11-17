@@ -262,7 +262,40 @@ every non-read request). `/admin/login` and `/admin/login/callback` are excluded
 docs0 is deployed to Cloud Run (project `ai-agent-boilerplate0`, `us-central1`) as a scale-to-zero service (max one
 instance) on the shared Cloud SQL Postgres instance, with its own role and database. The database is created by the
 app at first boot (`DOCS0_AUTO_CREATE_DATABASE`, `config/DatabaseBootstrap`, run from an `EnvironmentPostProcessor`
-before the DataSource exists). Slack reaches it over HTTP events; syncs and the weekly digest run as Cloud Run Jobs
-triggered by Cloud Scheduler; configuration is plain environment variables from a GitHub environment. With
+before the DataSource exists). Slack reaches it over HTTP events (`DOCS0_SLACK_TRANSPORT=http`); syncs and the weekly
+digest run as Cloud Run Jobs triggered by Cloud Scheduler (`DOCS0_INTERNAL_SCHEDULER=false`); configuration is plain
+environment variables from a GitHub environment. With
 `DOCS0_ADMIN_PASSWORD` set, `/admin/**` and `/` need the password and `/health` returns only `UP`. See the README
 section "Deploying to Cloud Run" and `deploy/deploy.sh`.
+
+**Scale to zero.** The service has request-based CPU, so CPU is throttled to almost nothing whenever no request is in
+flight; nothing may run after a response. Consequences, all in code:
+
+- *Hold-open.* With `docs0.slack.transport=http`, `SlackEventsController` verifies the signature, runs the handler
+  path and waits for the `CompletableFuture` the handlers return (`QuestionHandler`, `ReactionHandler`,
+  `ActionHandler` all return one that covers the whole answer, the thumbs-down prompt and draft buttons) for at most
+  `docs0.slack.hold-open-seconds` (270, under Cloud Run's 300 s) and only then answers 200 with an empty body.
+  `url_verification` answers at once. A request with `X-Slack-Retry-Num`, or an event id already accepted (finished or
+  in flight; one `seen` map covers both) is answered 200 at once and not run again; per-conversation ordering stays in
+  `QuestionHandler.enqueue`. Slack gives up after 3 s and retries; that is expected.
+- *Cold start.* The first event may arrive while the instance is still starting. `SlackGateway.tenantOf` registers the
+  pilot workspace on demand (`auth.test` then `LocalSlackPilot.register`, single-flight, remembered, failures retried at
+  most every 30 s) when the team id is unknown and a pilot bot token and signing secret are set; the same registration
+  also runs in the background at startup.
+- *One switch for timers.* `config/SchedulingConfig` (`@EnableScheduling`, created only while
+  `docs0.scheduler.enabled` is true) is the only place scheduling is switched on, and it owns the startup sync. Off, no
+  `@Scheduled` method (source sync, weekly digest) runs.
+- *Jobs.* `Docs0Application.main` hands `--docs0.job=sync|digest` to `job/JobRunner`: non-web context, no Slack
+  listener (`docs0.slack.transport=none`), scheduler off, run `job/JobTasks`, exit 0 when the job ran (a source failure
+  is a `sync_run` row, not a job failure), 1 when it crashed, 2 for bad arguments. `sync` registers the pilot workspace
+  when a bot token is set, then runs `SyncScheduler.syncAll` (every active tenant, every configured connector), optionally
+  narrowed by `--docs0.job.tenant` / `--docs0.job.source`; `digest` is `DigestService.runOnce` (once per week per tenant).
+- *Cross-process sync guard.* `SyncService` takes a Postgres session advisory lock
+  (`pg_try_advisory_lock(hashtext('docs0-sync'), hashtext('<tenant>:<source>'))`, `source/SyncLock`) on a dedicated
+  connection for the whole run, in addition to the in-process guard; a run that cannot get it is skipped. "Is a sync
+  running" on the Sources pages is derived from `sync_run` (RUNNING and younger than 3 hours); an older RUNNING row is
+  shown as Interrupted and kept.
+- *Sync now.* With `DOCS0_SYNC_JOB_NAME` set the button calls `job/JobLauncher` (`CloudRunJobLauncher`: metadata-server
+  token, then Cloud Run Admin API `jobs/{job}:run` with args overrides for that tenant and source). With
+  `transport=http` and no job name it syncs inside the request. Otherwise (the laptop pilot) it syncs on a thread as
+  before.

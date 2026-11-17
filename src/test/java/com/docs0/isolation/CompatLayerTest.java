@@ -23,7 +23,7 @@ import org.springframework.mock.web.MockHttpServletResponse;
 
 /**
  * The only place the single configured tenant may be assumed is the compatibility layer
- * ({@code com.docs0.tenant.local}) and the two entry points that serve the pilot by design. Everything else is told
+ * ({@code com.docs0.tenant.local}) and the entry points that serve the pilot by design. Everything else is told
  * which tenant it works for.
  */
 class CompatLayerTest {
@@ -33,6 +33,7 @@ class CompatLayerTest {
     /** Entry points that serve the configured local tenant by design. */
     private static final List<String> PILOT_ENTRY_POINTS = List.of(
             "com/docs0/slack/SlackGateway.java",     // Socket Mode serves the one configured Slack app
+            "com/docs0/job/JobTasks.java",           // the jobs register the one configured Slack workspace, no listener
             "com/docs0/web/StatusController.java");  // the public status page and /health report the local tenant
 
     private static List<Path> mainSources() throws IOException {

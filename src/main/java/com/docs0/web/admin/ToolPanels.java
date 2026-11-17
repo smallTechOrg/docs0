@@ -192,7 +192,7 @@ public class ToolPanels {
         boolean running = syncService.isRunning(tenantId, sourceId);
         List<SourcesController.RunRow> rows = new ArrayList<>();
         for (SyncRun run : runs.recent(tenantId, sourceId, RECENT_RUNS)) {
-            rows.add(SourcesController.runRow(run, running));
+            rows.add(SourcesController.runRow(run, running && rows.isEmpty()));
         }
         return new Panel(id, title, "connected", credential.accountName(), confirm, running,
                 documents.count(tenantId, sourceId), choices, error, rows);

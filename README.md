@@ -419,29 +419,50 @@ docs0 can run on Google Cloud Run in the project `ai-agent-boilerplate0` (region
 Cloud SQL Postgres instance `ai-agent-db` with the other apps. Everything is driven by `deploy/deploy.sh` (a dry run
 unless you pass `--apply`) and the GitHub Actions workflow `.github/workflows/deploy.yml`.
 
-> **Status of the pieces.** Implemented and tested in this repository: the `Dockerfile`, `PORT` handling, the small
-> database pool, database auto-creation (`DOCS0_AUTO_CREATE_DATABASE`), the password-protected status page and
-> `/health` that says only `UP`, graceful shutdown, `deploy/deploy.sh` and the workflow. **Implemented by the follow-up
-> code change** (the deploy script already passes these settings): the HTTP transport for the single-company pilot
-> (`DOCS0_SLACK_TRANSPORT=http`), holding the request open while an answer is produced, the job entrypoint
-> (`--docs0.job=sync` / `--docs0.job=digest`), `DOCS0_INTERNAL_SCHEDULER=false` and the "Sync now" button that starts
-> the sync job (`DOCS0_SYNC_JOB_NAME`, `DOCS0_GCP_PROJECT`, `DOCS0_GCP_REGION`). Until that lands, the deployed service
-> starts and serves the admin pages, but Slack over HTTP and the scheduled jobs do not work yet.
+> **Status.** Everything described here is implemented and tested in this repository: the `Dockerfile`, `PORT`
+> handling, the small database pool, database auto-creation, the password-protected status page, the HTTP transport
+> for the single-company Slack app (`DOCS0_SLACK_TRANSPORT=http`) with the request held open while an answer is
+> produced, the job entrypoint (`--docs0.job=sync` / `--docs0.job=digest`), `DOCS0_INTERNAL_SCHEDULER=false`, the
+> "Sync now" button that starts the sync job (`DOCS0_SYNC_JOB_NAME`, `DOCS0_GCP_PROJECT`, `DOCS0_GCP_REGION`),
+> `deploy/deploy.sh` and the workflow. What can only be checked on the real cloud (metadata-server token, the Cloud Run
+> Admin API call, real cold-start timing and Slack's retry behaviour) is listed in the build journal.
 
 ### How it runs
 
 - **Scale to zero.** One Cloud Run service `docs0` (`--min-instances 0 --max-instances 1`, 1 vCPU, 1 GiB, request-based
-  CPU). When nobody uses it there is no instance and nothing to pay for. The first request after idle starts a container:
-  a Slack message right after a quiet spell can take about 10 seconds to be answered, and Slack may show one delivery
-  retry (docs0 ignores the duplicate).
+  CPU). When nobody uses it there is no instance and nothing to pay for. With request-based CPU the container gets
+  almost no CPU whenever no request is in flight, so docs0 never does work after a response (see "Hold-open" below).
+- **Cold start.** The first request after idle starts a container (about 10 seconds plus the first-boot migrations only
+  once). A Slack message right after a quiet spell is answered a few seconds late. The first event often reaches the
+  new instance before its background Slack registration has finished: docs0 then registers the workspace on the spot
+  (one `auth.test` call, shared by all events that arrive meanwhile) instead of dropping the message.
+- **Hold-open.** Slack wants an answer within 3 seconds, but an answer takes longer, and anything left running after the
+  response is frozen by Cloud Run. So with `DOCS0_SLACK_TRANSPORT=http` the `/slack/events` and `/slack/interactions`
+  requests are held open until the work (the answer, a follow-up, a thumbs-down prompt, a draft button) is finished, at
+  most `DOCS0_SLACK_HOLD_OPEN_SECONDS` (default 270, under Cloud Run's 300 s request timeout), and then answered 200 with an
+  empty body. Slack gives up waiting after 3 seconds and sends the same event again with `X-Slack-Retry-Num`; docs0
+  answers every retry, and any event it already has in hand, with an immediate 200 and does not run it twice. The
+  held request keeps running after Slack hangs up, so the answer is still posted. Slack may show "failed to deliver"
+  or "your app didn't respond in time" for the first attempt in its event log; that is expected and harmless.
 - **Slack over HTTP, not Socket Mode.** A scaled-to-zero service cannot hold a websocket, so Slack sends events to
   `$PUBLIC_URL/slack/events` and button clicks to `$PUBLIC_URL/slack/interactions`.
 - **Background work is a Cloud Run Job, not a thread.** Document syncs and the weekly digest run as the Cloud Run Jobs
   `docs0-sync` and `docs0-digest` (the same image, started with `--docs0.job=sync` / `--docs0.job=digest`), triggered by
   Cloud Scheduler: `docs0-sync` every 15 minutes (`*/15 * * * *`), `docs0-digest` on Monday 09:00 (`0 9 * * 1`, in
   `DOCS0_TIMEZONE`, default UTC). Scheduler calls the Cloud Run Jobs `run` API with an OAuth token of the runtime
-  service account. The in-app scheduler is off in the service (`DOCS0_INTERNAL_SCHEDULER=false`). The Sources page
-  "Sync now" button starts `docs0-sync` through the same API.
+  service account. The in-app scheduler is off in the service (`DOCS0_INTERNAL_SCHEDULER=false`): no timer runs in the
+  service at all. A job starts the same image without a web server and without Slack listeners, registers the Slack
+  workspace from `DOCS0_SLACK_BOT_TOKEN`, does its work and exits (0 = it ran; a source that failed is recorded in the
+  sync log and does not fail the job; non-zero = the job itself crashed). `docs0-sync` syncs every configured source of
+  every active company; `docs0-digest` posts the weekly digest once per company per week. Two syncs of one source (two
+  job runs, or a job and the service) are kept apart by a Postgres advisory lock; the loser logs "skipped" and stops.
+- **Sync now.** With `DOCS0_SYNC_JOB_NAME` set, the Sources page "Sync now" buttons (Drive, Linear, Trello, Grain, Gmail,
+  Slack history) start `docs0-sync` for that one source through the Cloud Run Admin API (the service account needs
+  `run.jobs.runWithOverrides`; the `jobs` step of the deploy script grants `roles/run.developer` on `docs0-sync`, because
+  `roles/run.invoker` alone does not cover per-run arguments). The page says "A sync was requested. It starts in a few seconds; this page refreshes while it runs." and
+  the run appears when the job starts; if the request fails it says "Could not start the sync job (...). It will run at
+  the next scheduled time." The "is a sync running" state on the pages is read from the database, so it is right
+  while a job in another process is syncing; a run marked RUNNING for over 3 hours shows as Interrupted.
 - **Shared database.** The instance `ai-agent-db` (Postgres 17, private IP `10.110.112.7`, SSL required) holds about ten
   apps and allows 90 connections in all, so docs0 keeps a pool of at most 5 (`DOCS0_DB_POOL_MAX`). docs0 gets its own
   role `docs0_app` (created with `gcloud sql users create`, so it may `CREATE DATABASE`) and its own database `docs0`,
@@ -500,15 +521,23 @@ unless you pass `--apply`) and the GitHub Actions workflow `.github/workflows/de
 
 ### Slack app changes (the owner makes these in api.slack.com)
 
-Use the same Slack app as before and change it once the service is live:
+Edit the same Slack app you already use for the laptop version, once the service is live:
 
-1. **Socket Mode:** switch it **off** (Settings -> Socket Mode).
-2. **Event Subscriptions:** switch on, Request URL `https://docs0.smalltech.in/slack/events` (it must show *Verified*;
-   the service must be deployed with `DOCS0_SLACK_SIGNING_SECRET` set), keep the existing bot events.
-3. **Interactivity & Shortcuts:** on, Request URL `https://docs0.smalltech.in/slack/interactions`.
-4. **Basic Information -> App Credentials -> Signing Secret:** copy it into the GitHub secret
-   `DOCS0_SLACK_SIGNING_SECRET`, then deploy again.
-5. **Reinstall the app** to the workspace (Install App -> Reinstall) so the changed settings apply.
+1. Open https://api.slack.com/apps, choose the app, then **App Manifest**. Paste the contents of
+   [slack/manifest-hosted.yml](slack/manifest-hosted.yml) (same scopes and bot events as `slack/manifest.yml`; it turns
+   Socket Mode off, sets the Event Subscriptions Request URL to `https://docs0.smalltech.in/slack/events` and the
+   Interactivity Request URL to `https://docs0.smalltech.in/slack/interactions`) and save. If the service is not on
+   `docs0.smalltech.in` yet, change both URLs in the pasted text.
+   *By hand instead:* Settings -> Socket Mode -> off; Event Subscriptions -> on, Request URL
+   `https://docs0.smalltech.in/slack/events` (it must show *Verified*, so the service has to be deployed with
+   `DOCS0_SLACK_SIGNING_SECRET` set), keep the existing bot events; Interactivity & Shortcuts -> on, Request URL
+   `https://docs0.smalltech.in/slack/interactions`.
+2. **Basic Information -> App Credentials -> Signing Secret:** copy it into the GitHub secret
+   `DOCS0_SLACK_SIGNING_SECRET`, then deploy again. (The Request URL check in step 1 only passes once the service runs
+   with that secret.)
+3. **Install App -> Reinstall to Workspace** so the changed settings apply. The bot token stays the same; no app-level
+   token (`xapp-`) is needed any more.
+4. **Stop the laptop instance** (below).
 
 **Stop the laptop first.** Once the app uses HTTP events, a docs0 on your laptop in Socket Mode no longer receives
 anything; do not run it against the same Slack app. Two docs0 instances against one workspace would split events.
@@ -534,8 +563,17 @@ open `/admin/sources` on the hosted URL and connect Google Drive.
 
 `PORT` (set by Cloud Run; overrides `DOCS0_PORT`), `DOCS0_DATABASE_URL` (use `?sslmode=require`),
 `DOCS0_DATABASE_USER`, `DOCS0_DATABASE_PASSWORD`, `DOCS0_AUTO_CREATE_DATABASE` (default `false`), `DOCS0_DB_POOL_MAX`
-(default 5), `DOCS0_ADMIN_PASSWORD`. Follow-up: `DOCS0_SLACK_TRANSPORT`, `DOCS0_INTERNAL_SCHEDULER`,
-`DOCS0_SYNC_JOB_NAME`, `DOCS0_GCP_PROJECT`, `DOCS0_GCP_REGION`.
+(default 5), `DOCS0_ADMIN_PASSWORD`, `DOCS0_SLACK_TRANSPORT` (`socket` default, `http` hosted),
+`DOCS0_SLACK_SIGNING_SECRET`, `DOCS0_SLACK_HOLD_OPEN_SECONDS` (default 270), `DOCS0_INTERNAL_SCHEDULER` (default
+`true`; `false` hosted), `DOCS0_SYNC_JOB_NAME`, `DOCS0_GCP_PROJECT`, `DOCS0_GCP_REGION` (the last three: "Sync now"
+starts the job). With none of the new settings set, docs0 behaves exactly as on a laptop: Socket Mode, in-process
+timers, in-process "Sync now".
+
+### Running a job by hand
+
+`java -jar docs0.jar --docs0.job=sync` (optionally `--docs0.job.tenant=<id> --docs0.job.source=<id>`) or
+`--docs0.job=digest` starts docs0 without a web server, runs once and exits with 0 (ran), 1 (crashed) or 2 (bad
+arguments). It needs the same database settings as the service. Cloud Run Jobs start it this way.
 
 ## Test
 

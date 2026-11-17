@@ -34,6 +34,14 @@ public class SourceRepository {
                 .single();
     }
 
+    /** The source with this id, whichever tenant it belongs to (ids are unique); callers check the tenant. */
+    public Optional<Source> findById(long sourceId) {
+        return jdbc.sql("SELECT id, tenant_id, kind, name, visibility FROM source WHERE id = :id")
+                .param("id", sourceId)
+                .query(MAPPER)
+                .optional();
+    }
+
     public Optional<Source> find(long tenantId, String kind, String name) {
         return jdbc.sql("""
                         SELECT id, tenant_id, kind, name, visibility FROM source

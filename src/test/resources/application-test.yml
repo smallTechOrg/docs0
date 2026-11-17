@@ -26,6 +26,14 @@ docs0:
     client-id: ""
     client-secret: ""
     signing-secret: ""
+    transport: socket
+    hold-open-seconds: 270
+  scheduler:
+    enabled: true
+  hosted:
+    sync-job-name: ""
+    gcp-project: ""
+    gcp-region: ""
   drive:
     sync-on-startup: false
   slack-history:

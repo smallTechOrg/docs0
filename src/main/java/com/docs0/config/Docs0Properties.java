@@ -56,16 +56,28 @@ public record Docs0Properties(
      * @param appToken      pilot only: the Socket Mode app-level token
      * @param clientId      distributed app: OAuth client id (Add to Slack and Sign in with Slack)
      * @param clientSecret  distributed app: OAuth client secret
-     * @param signingSecret distributed app: verifies requests Slack sends to /slack/events and /slack/interactions
+     * @param signingSecret verifies requests Slack sends to /slack/events and /slack/interactions (distributed app,
+     *                      and the single-company pilot when {@code transport} is http)
+     * @param transport     how Slack reaches the single-company pilot: socket (default) or http. Anything else
+     *                      (job mode sets "none") starts no Slack listener at all
+     * @param holdOpenSeconds http transport: how long a Slack request is held open while its work finishes
      */
     public record Slack(String botToken, String appToken, String clientId, String clientSecret,
-            String signingSecret) {
+            String signingSecret, String transport, int holdOpenSeconds) {
 
-        /** The pilot's two tokens only: no distributed app. */
+        public static final int DEFAULT_HOLD_OPEN_SECONDS = 270;
+
+        /** The settings as bound from the environment. */
         @ConstructorBinding
         public Slack {
         }
 
+        /** Socket Mode (the default transport), without the HTTP settings. */
+        public Slack(String botToken, String appToken, String clientId, String clientSecret, String signingSecret) {
+            this(botToken, appToken, clientId, clientSecret, signingSecret, "socket", DEFAULT_HOLD_OPEN_SECONDS);
+        }
+
+        /** The pilot's two tokens only: no distributed app. */
         public Slack(String botToken, String appToken) {
             this(botToken, appToken, "", "", "");
         }
@@ -77,6 +89,25 @@ public record Docs0Properties(
         /** True when all three distributed-app settings are present. */
         public boolean multiTenant() {
             return hasText(clientId) && hasText(clientSecret) && hasText(signingSecret);
+        }
+
+        /** Slack sends events over HTTP (DOCS0_SLACK_TRANSPORT=http): no Socket Mode, work is held inside the request. */
+        public boolean httpTransport() {
+            return transport != null && transport.strip().equalsIgnoreCase("http");
+        }
+
+        /** Socket Mode is the transport: unset, blank or "socket". */
+        public boolean socketTransport() {
+            return transport == null || transport.isBlank() || transport.strip().equalsIgnoreCase("socket");
+        }
+
+        /** HTTP transport with the pilot's bot token and the signing secret both set. */
+        public boolean httpPilotConfigured() {
+            return httpTransport() && hasText(botToken) && hasText(signingSecret);
+        }
+
+        public java.time.Duration holdOpen() {
+            return java.time.Duration.ofSeconds(holdOpenSeconds > 0 ? holdOpenSeconds : DEFAULT_HOLD_OPEN_SECONDS);
         }
     }
 

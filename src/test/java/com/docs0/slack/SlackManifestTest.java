@@ -40,11 +40,28 @@ class SlackManifestTest {
         assertThat(botScopes(distributed)).containsExactlyInAnyOrderElementsOf(botScopes(pilot));
         assertThat(botEvents(distributed)).containsExactlyInAnyOrderElementsOf(botEvents(pilot));
         assertThat(map(distributed, "features")).isEqualTo(map(pilot, "features"));
+        Map<String, Object> hosted = load("manifest-hosted.yml");
+        assertThat(botScopes(hosted)).containsExactlyInAnyOrderElementsOf(botScopes(pilot));
+        assertThat(botEvents(hosted)).containsExactlyInAnyOrderElementsOf(botEvents(pilot));
+        assertThat(map(hosted, "features")).isEqualTo(map(pilot, "features"));
+    }
+
+    @Test
+    void theHostedManifestUsesHttpAtTheHostedDomainAndHasNoOauthRedirects() throws Exception {
+        Map<String, Object> manifest = load("manifest-hosted.yml");
+        Map<String, Object> settings = map(manifest, "settings");
+
+        assertThat(settings).containsEntry("socket_mode_enabled", false);
+        assertThat(map(settings, "event_subscriptions")).containsEntry("request_url",
+                "https://docs0.smalltech.in/slack/events");
+        assertThat(map(settings, "interactivity")).containsEntry("is_enabled", true)
+                .containsEntry("request_url", "https://docs0.smalltech.in/slack/interactions");
+        assertThat(map(manifest, "oauth_config")).doesNotContainKey("redirect_urls");
     }
 
     @Test
     void theScopeConstantMatchesBothManifests() throws Exception {
-        for (String file : List.of("manifest.yml", "manifest-distributed.yml")) {
+        for (String file : List.of("manifest.yml", "manifest-distributed.yml", "manifest-hosted.yml")) {
             Map<String, Object> manifest = load(file);
             assertThat(botScopes(manifest)).as(file).containsExactlyInAnyOrderElementsOf(SlackScopes.BOT);
             assertThat(botEvents(manifest)).as(file).containsExactlyInAnyOrderElementsOf(SlackScopes.BOT_EVENTS);
@@ -53,7 +70,7 @@ class SlackManifestTest {
 
     @Test
     void bothManifestsSubscribeToTheUninstallEventsTheHttpHandlersExpect() throws Exception {
-        for (String file : List.of("manifest.yml", "manifest-distributed.yml")) {
+        for (String file : List.of("manifest.yml", "manifest-distributed.yml", "manifest-hosted.yml")) {
             assertThat(botEvents(load(file))).as(file).contains("app_uninstalled", "tokens_revoked");
         }
         assertThat(SlackScopes.BOT_EVENTS).contains("app_uninstalled", "tokens_revoked");

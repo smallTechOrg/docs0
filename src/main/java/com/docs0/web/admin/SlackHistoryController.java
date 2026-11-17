@@ -5,6 +5,7 @@ import com.docs0.slack.SlackMessengers;
 import com.docs0.slack.SlackMessenger.ChannelInfo;
 import com.docs0.slack.SlackMessenger.SlackMessage;
 import com.docs0.source.Source;
+import com.docs0.job.SyncNow;
 import com.docs0.source.SyncService;
 import com.docs0.source.slack.SlackChannel;
 import com.docs0.source.slack.SlackHistoryConnection;
@@ -40,15 +41,17 @@ public class SlackHistoryController {
     private final SlackHistoryPanel panel;
     private final SlackMessengers messengers;
     private final SyncService syncService;
+    private final SyncNow syncNow;
 
     public SlackHistoryController(SlackHistoryConnection connection,
                                   SlackHistoryConnector connector, SlackHistoryPanel panel,
-                                  SlackMessengers messengers, SyncService syncService) {
+                                  SlackMessengers messengers, SyncService syncService, SyncNow syncNow) {
         this.connection = connection;
         this.connector = connector;
         this.panel = panel;
         this.messengers = messengers;
         this.syncService = syncService;
+        this.syncNow = syncNow;
     }
 
     @PostMapping(BASE + "/channels")
@@ -137,9 +140,7 @@ public class SlackHistoryController {
             return failed(flash, "Choose at least one channel first.");
         }
         panel.forget(tenantId);
-        if (!syncService.startInBackground(admin.tenantId(), connector)) {
-            flash.addFlashAttribute("notice", "A Slack history sync is already running.");
-        }
+        syncNow.request(tenantId, connector).flash(flash, "A Slack history sync is already running.");
         return to();
     }
 

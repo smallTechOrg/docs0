@@ -4,11 +4,10 @@ import com.docs0.config.Docs0Properties;
 import com.docs0.tenant.Tenant;
 import com.docs0.tenant.TenantService;
 import java.util.List;
+import java.util.function.Predicate;
 import java.util.concurrent.TimeUnit;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.boot.context.event.ApplicationReadyEvent;
-import org.springframework.context.event.EventListener;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
@@ -34,8 +33,10 @@ public class SyncScheduler {
         this.tenants = tenants;
     }
 
-    /** Startup sync, on its own thread so a long first sync never delays the app coming up. */
-    @EventListener(ApplicationReadyEvent.class)
+    /**
+     * Startup sync, on its own thread so a long first sync never delays the app coming up. Called by
+     * {@code SchedulingConfig}, which exists only while the internal scheduler is on.
+     */
     public void onReady() {
         if (!props.drive().syncOnStartup()) {
             return;
@@ -55,10 +56,18 @@ public class SyncScheduler {
             log.warn("Could not list tenants to sync: {}", e.getClass().getName());
             return;
         }
+        syncAll(active, connector -> true);
+    }
+
+    /**
+     * Syncs these tenants side by side, each with every configured connector accepted by {@code only}. Also the
+     * entry point of the sync job (which lists the tenants itself, so an unreachable database fails the job).
+     */
+    public void syncAll(List<Tenant> active, Predicate<SourceConnector> only) {
         // Tenants run side by side, so a slow or stuck one never holds up the others; this returns when all are done.
         List<Thread> running = new java.util.ArrayList<>();
         for (Tenant tenant : active) {
-            running.add(Thread.ofVirtual().name("sync-tenant-" + tenant.id()).start(() -> syncTenant(tenant.id())));
+            running.add(Thread.ofVirtual().name("sync-tenant-" + tenant.id()).start(() -> syncTenant(tenant.id(), only)));
         }
         for (Thread thread : running) {
             try {
@@ -75,9 +84,13 @@ public class SyncScheduler {
      * each is tried on its own.
      */
     void syncTenant(long tenantId) {
+        syncTenant(tenantId, connector -> true);
+    }
+
+    public void syncTenant(long tenantId, Predicate<SourceConnector> only) {
         for (SourceConnector connector : connectors) {
             try {
-                if (!connector.configured(tenantId)) {
+                if (!only.test(connector) || !connector.configured(tenantId)) {
                     continue;
                 }
                 syncService.run(tenantId, connector);

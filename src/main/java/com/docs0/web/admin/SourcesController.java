@@ -7,6 +7,7 @@ import com.docs0.source.SourceAccessException;
 import com.docs0.source.SourceCredential;
 import com.docs0.source.SyncRun;
 import com.docs0.source.SyncRunRepository;
+import com.docs0.job.SyncNow;
 import com.docs0.source.SyncService;
 import com.docs0.source.drive.DriveClient;
 import com.docs0.source.drive.DriveConnection;
@@ -80,6 +81,7 @@ public class SourcesController {
     private final GoogleOAuth oauth;
     private final FolderCounts counts;
     private final SyncService syncService;
+    private final SyncNow syncNow;
     private final SyncRunRepository runs;
     private final DocumentStore documents;
     private final ToolPanels toolPanels;
@@ -89,7 +91,7 @@ public class SourcesController {
     public SourcesController(Docs0Properties props, TenantService tenants, DriveConnection connection,
                              DriveClient drive, DriveConnector connector, GoogleOAuth oauth, FolderCounts counts,
                              SyncService syncService, SyncRunRepository runs, DocumentStore documents,
-                             ToolPanels toolPanels, SlackHistoryPanel slackHistory, GmailPanel gmail) {
+                             ToolPanels toolPanels, SlackHistoryPanel slackHistory, GmailPanel gmail, SyncNow syncNow) {
         this.props = props;
         this.tenants = tenants;
         this.connection = connection;
@@ -98,6 +100,7 @@ public class SourcesController {
         this.oauth = oauth;
         this.counts = counts;
         this.syncService = syncService;
+        this.syncNow = syncNow;
         this.runs = runs;
         this.documents = documents;
         this.toolPanels = toolPanels;
@@ -137,8 +140,11 @@ public class SourcesController {
         boolean running = syncService.isRunning(admin.tenantId(), sourceId);
         model.addAttribute("syncRunning", running);
         model.addAttribute("documents", documents.count(tenantId, sourceId));
-        model.addAttribute("runs", runs.recent(tenantId, sourceId, RECENT_RUNS).stream()
-                .map(run -> runRow(run, running)).toList());
+        List<RunRow> runRows = new ArrayList<>();
+        for (SyncRun run : runs.recent(tenantId, sourceId, RECENT_RUNS)) {
+            runRows.add(runRow(run, running && runRows.isEmpty())); // only the newest run can be the live one
+        }
+        model.addAttribute("runs", runRows);
 
         List<Folder> trail = trail(request);
         model.addAttribute("here", url(trail));
@@ -270,9 +276,7 @@ public class SourcesController {
             return failed(flash, "Connect Google Drive first.");
         }
         counts.forget(tenantId);
-        if (!syncService.startInBackground(admin.tenantId(), connector)) {
-            flash.addFlashAttribute("notice", "A sync is already running.");
-        }
+        syncNow.request(tenantId, connector).flash(flash, "A sync is already running.");
         return to(safeBack(back));
     }
 
@@ -298,11 +302,11 @@ public class SourcesController {
         } else if (SyncRun.FAILED.equals(run.status())) {
             state = "DOWN";
             label = "Failed";
-        } else if (running) {
+        } else if (running && run.startedAt().isAfter(Instant.now().minus(SyncRunRepository.STALE_AFTER))) {
             state = "OFF";
             label = "Running";
         } else {
-            // Left as RUNNING by an app that stopped mid-sync.
+            // Left as RUNNING by a process that stopped mid-sync (or one that began over three hours ago).
             state = "DOWN";
             label = "Interrupted";
         }

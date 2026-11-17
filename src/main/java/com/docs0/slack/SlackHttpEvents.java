@@ -10,6 +10,7 @@ import com.slack.api.model.event.ReactionRemovedEvent;
 import com.slack.api.util.json.GsonFactory;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
+import java.util.concurrent.CompletableFuture;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -23,6 +24,7 @@ import org.springframework.stereotype.Component;
 public class SlackHttpEvents {
 
     private static final Logger log = LoggerFactory.getLogger(SlackHttpEvents.class);
+    private static final CompletableFuture<Void> DONE = CompletableFuture.completedFuture(null);
     private static final Gson GSON = GsonFactory.createSnakeCase();
 
     private final SlackGateway gateway;
@@ -38,26 +40,34 @@ public class SlackHttpEvents {
         return SlackHttp.text(envelope, "event_id");
     }
 
-    /** Handles the {@code event_callback} envelope of /slack/events. Never throws for a payload it does not know. */
-    public void eventCallback(JsonObject envelope) {
+    /**
+     * Handles the {@code event_callback} envelope of /slack/events. Never throws for a payload it does not know. The
+     * future completes when the handler has finished with the event (immediately for events docs0 does not use).
+     */
+    public CompletableFuture<Void> eventCallback(JsonObject envelope) {
         String teamId = SlackHttp.text(envelope, "team_id");
         String eventId = eventId(envelope);
         JsonObject event = SlackHttp.object(envelope, "event");
         String type = SlackHttp.text(event, "type");
         if (type == null) {
-            return;
+            return DONE;
         }
         switch (type) {
-            case "app_mention" -> gateway.appMention(teamId, GSON.fromJson(event, AppMentionEvent.class), eventId);
+            case "app_mention" -> {
+                return gateway.appMention(teamId, GSON.fromJson(event, AppMentionEvent.class), eventId);
+            }
             // Bolt hands only subtype-less messages to its message handler; the rest are edits, joins, bot posts...
             case "message" -> {
                 if (SlackHttp.text(event, "subtype") == null) {
-                    gateway.message(teamId, GSON.fromJson(event, MessageEvent.class), eventId);
+                    return gateway.message(teamId, GSON.fromJson(event, MessageEvent.class), eventId);
                 }
             }
-            case "reaction_added" -> gateway.reactionAdded(teamId, GSON.fromJson(event, ReactionAddedEvent.class));
-            case "reaction_removed" ->
-                    gateway.reactionRemoved(teamId, GSON.fromJson(event, ReactionRemovedEvent.class));
+            case "reaction_added" -> {
+                return gateway.reactionAdded(teamId, GSON.fromJson(event, ReactionAddedEvent.class));
+            }
+            case "reaction_removed" -> {
+                return gateway.reactionRemoved(teamId, GSON.fromJson(event, ReactionRemovedEvent.class));
+            }
             case "app_uninstalled" -> workspaces.markRevoked(teamId);
             case "tokens_revoked" -> {
                 // Only the bot's token matters: a person revoking their own token does not remove docs0.
@@ -68,19 +78,20 @@ public class SlackHttpEvents {
             }
             default -> log.debug("Slack event type not used: {}", type.replaceAll("[^A-Za-z0-9_.]", ""));
         }
+        return DONE;
     }
 
     /** Handles the body of /slack/interactions: a form with one field, {@code payload}, holding JSON. */
-    public void interaction(byte[] rawBody) {
+    public CompletableFuture<Void> interaction(byte[] rawBody) {
         String json = payloadField(new String(rawBody, StandardCharsets.UTF_8));
         if (json == null) {
-            return;
+            return DONE;
         }
         JsonObject payload = SlackHttp.json(json);
         if (!"block_actions".equals(SlackHttp.text(payload, "type"))) {
-            return;
+            return DONE;
         }
-        gateway.blockAction(GSON.fromJson(payload, BlockActionPayload.class));
+        return gateway.blockAction(GSON.fromJson(payload, BlockActionPayload.class));
     }
 
     /** The decoded {@code payload} field of a form body, read from the raw text. */

@@ -58,6 +58,21 @@ docs0:
     client-id: ${DOCS0_SLACK_CLIENT_ID:}
     client-secret: ${DOCS0_SLACK_CLIENT_SECRET:}
     signing-secret: ${DOCS0_SLACK_SIGNING_SECRET:}
+    # How Slack reaches the single-company app: "socket" (Socket Mode, the laptop pilot) or "http" (hosted on Cloud
+    # Run: events and button clicks POST to /slack/events and /slack/interactions, signed with the signing secret).
+    transport: ${DOCS0_SLACK_TRANSPORT:socket}
+    # http transport: a Slack request is held open until its work is finished, at most this many seconds (keep it
+    # under the Cloud Run request timeout, 300).
+    hold-open-seconds: ${DOCS0_SLACK_HOLD_OPEN_SECONDS:270}
+  scheduler:
+    # false: nothing runs on a timer inside this process (no source sync, no weekly digest). Hosted mode runs them
+    # as Cloud Run Jobs instead.
+    enabled: ${DOCS0_INTERNAL_SCHEDULER:true}
+  hosted:
+    # Cloud Run Job that the Sources page "Sync now" button starts. Empty: "Sync now" syncs inside this process.
+    sync-job-name: ${DOCS0_SYNC_JOB_NAME:}
+    gcp-project: ${DOCS0_GCP_PROJECT:}
+    gcp-region: ${DOCS0_GCP_REGION:}
   drive:
     sync-interval-minutes: ${DOCS0_DRIVE_SYNC_INTERVAL_MINUTES:15}
     sync-on-startup: ${DOCS0_DRIVE_SYNC_ON_STARTUP:true}

@@ -2,6 +2,7 @@ package com.docs0.web.admin;
 
 import com.docs0.source.Source;
 import com.docs0.source.SourceAccessException;
+import com.docs0.job.SyncNow;
 import com.docs0.source.SyncService;
 import com.docs0.source.gmail.GmailClient;
 import com.docs0.source.gmail.GmailClient.DirectoryUser;
@@ -49,14 +50,16 @@ public class GmailController {
     private final GmailConnector connector;
     private final GmailPanel panel;
     private final SyncService syncService;
+    private final SyncNow syncNow;
 
     public GmailController(GmailConnection connection, GmailClient client,
-                           GmailConnector connector, GmailPanel panel, SyncService syncService) {
+                           GmailConnector connector, GmailPanel panel, SyncService syncService, SyncNow syncNow) {
         this.connection = connection;
         this.client = client;
         this.connector = connector;
         this.panel = panel;
         this.syncService = syncService;
+        this.syncNow = syncNow;
     }
 
     @PostMapping(BASE + "/connect")
@@ -199,9 +202,7 @@ public class GmailController {
         if (connection.credential(admin.tenantId()).isEmpty()) {
             return failed(flash, "Add the service account key first.");
         }
-        if (!syncService.startInBackground(admin.tenantId(), connector)) {
-            flash.addFlashAttribute("notice", "A Gmail sync is already running.");
-        }
+        syncNow.request(admin.tenantId(), connector).flash(flash, "A Gmail sync is already running.");
         return to();
     }
 

@@ -45,7 +45,8 @@ There is no service account. An admin connects Drive from the dashboard.
 - **Check access.** For the current selection the page shows each folder's name and how
   many indexable files docs0 found in it, without waiting for a sync.
 - **Sync now.** A button starts a sync immediately; the page shows it running and then
-  the result. Syncs also run at startup and every 15 minutes.
+  the result. Syncs also run at startup and every 15 minutes (hosted: as the Cloud Run Job `docs0-sync` started by Cloud
+  Scheduler; `DOCS0_INTERNAL_SCHEDULER=false` turns the in-process timers off, and "Sync now" then starts the job).
 - **Disconnect.** Removes the stored grant and marks the source's documents deleted so
   they drop out of answers.
 - **Types.** Google Docs, Sheets and Slides (exported to text / CSV), PDFs, and plain
@@ -129,7 +130,8 @@ Slack thread, only after the asker confirms. It never edits or deletes anything 
 - **Check access, Sync now, Disconnect** work as for Drive: counts of issues or cards found
   for the selection (capped at 2,000), an asynchronous sync, and a disconnect that deletes the
   secret and marks the source's documents deleted. The last five sync runs are listed.
-  Syncs also run at startup and every 15 minutes. Document counts per source kind are shown
+  Syncs also run at startup and every 15 minutes (hosted: as the Cloud Run Job `docs0-sync` started by Cloud
+  Scheduler; `DOCS0_INTERNAL_SCHEDULER=false` turns the in-process timers off, and "Sync now" then starts the job). Document counts per source kind are shown
   on the Sources page.
 - **Documents.** One document per Linear issue (`issue:<id>`, title `ENG-12: <title>`),
   project (`project:<id>`) and Linear document (`doc:<id>`, only those attached to a project
@@ -344,7 +346,15 @@ one admin password, one configured tenant).
   parsed with the Slack SDK model classes and passed to the same `SlackGateway` methods the Socket Mode handlers
   call, which resolve the tenant by `team_id` (unknown or revoked: ignored). `url_verification` returns the
   challenge; Slack retries are dropped by event id and by the handlers' own de-duplication. Socket Mode runs only
-  when `DOCS0_SLACK_APP_TOKEN` and the bot token are set (the pilot); both transports may coexist.
+  when `DOCS0_SLACK_APP_TOKEN` and the bot token are set (the pilot) and `DOCS0_SLACK_TRANSPORT` is `socket` (the
+  default); both transports may coexist in multi-tenant mode.
+- **Single-company HTTP transport (hosted, scale to zero).** `DOCS0_SLACK_TRANSPORT=http` with the bot token and
+  `DOCS0_SLACK_SIGNING_SECRET`: no Socket Mode; `/slack/events` and `/slack/interactions` serve the one company
+  (blank signing secret rejects everything); `/slack/install` and sign-in stay off unless multi-tenant mode is on. The
+  request is held open until the handler has finished, at most `DOCS0_SLACK_HOLD_OPEN_SECONDS` (default 270), because
+  work after the response is frozen on request-based CPU; Slack's retries and duplicates of an event in flight get 200
+  at once. An event from the not-yet-registered pilot workspace registers it on demand instead of being dropped.
+  Status: `events over HTTP (signing secret set)`, OFF without the token or secret, DOWN when registration fails.
 - **Sign in with Slack.** `SlackAdminAuthenticator` (consulted first in this mode): `GET /admin/login` ->
   Slack OpenID Connect with state and nonce in the session; the callback maps the person's workspace to the tenant
   with that `slack_team_id` and admits them if their email is in `tenant.admin_emails` or Slack says they are a

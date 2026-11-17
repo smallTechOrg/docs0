@@ -68,6 +68,11 @@ public class DigestService {
     /** The scheduled run. Disabled by setting DOCS0_DIGEST_CRON to "-". */
     @Scheduled(cron = "${docs0.digest.cron:0 0 9 * * MON}", zone = "${docs0.digest.zone:UTC}")
     public void scheduled() {
+        runOnce();
+    }
+
+    /** Posts the weekly digest for every active tenant that is due (once per week each). Also the digest job. */
+    public void runOnce() {
         // Every active tenant in turn; one tenant's failure never stops the others.
         for (Tenant tenant : tenants.active()) {
             try {

@@ -23,6 +23,8 @@ import com.slack.api.socket_mode.SocketModeClient;
 import jakarta.annotation.PreDestroy;
 import java.util.Optional;
 import java.util.OptionalLong;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
 import java.util.regex.Pattern;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -51,6 +53,7 @@ public class SlackGateway implements StatusContributor {
             + Pattern.quote(AnswerRenderer.DRAFT_CREATE_ACTION) + "|"
             + Pattern.quote(AnswerRenderer.DRAFT_CANCEL_ACTION) + ")$");
     private static final long RETRY_DELAY_MILLIS = 30_000;
+    private static final CompletableFuture<Void> DONE = CompletableFuture.completedFuture(null);
 
     private final Docs0Properties props;
     private final SlackWorkspaces workspaces;
@@ -64,6 +67,13 @@ public class SlackGateway implements StatusContributor {
     private volatile Thread connector;
     private volatile boolean stopped;
 
+    /** On-demand registration of the pilot workspace (http transport): single-flight, remembered, retried every 30 s. */
+    private final Object registration = new Object();
+    private volatile boolean pilotRegistered;
+    private long lastFailureNanos;
+    private boolean failedBefore;
+    private java.util.function.LongSupplier nanoClock = System::nanoTime;
+
     public SlackGateway(Docs0Properties props, SlackWorkspaces workspaces, LocalSlackPilot pilot,
             QuestionHandler handler, ReactionHandler reactions, ActionHandler draftActions) {
         this.props = props;
@@ -72,29 +82,54 @@ public class SlackGateway implements StatusContributor {
         this.handler = handler;
         this.reactions = reactions;
         this.draftActions = draftActions;
-        this.status = configured()
-                ? ComponentStatus.down(NAME, "not connected yet")
-                : ComponentStatus.off(NAME, "no Slack tokens configured");
+        if (props.slack() != null && props.slack().httpTransport()) {
+            this.status = props.slack().httpPilotConfigured()
+                    ? ComponentStatus.up(NAME, "events over HTTP (signing secret set)")
+                    : ComponentStatus.off(NAME, "events over HTTP need DOCS0_SLACK_BOT_TOKEN and DOCS0_SLACK_SIGNING_SECRET");
+        } else {
+            this.status = configured()
+                    ? ComponentStatus.down(NAME, "not connected yet")
+                    : ComponentStatus.off(NAME, "no Slack tokens configured");
+        }
     }
 
     /** The Socket Mode connection serves the pilot tenant only; every other tenant has no connection to report. */
     @Override
     public ComponentStatus status(long tenantId) {
-        boolean socketServes = configured() && pilot != null && tenantId == pilot.tenantId();
-        if (props.multiTenant() && workspaces != null && !socketServes) {
+        boolean http = props.slack() != null && props.slack().httpTransport();
+        boolean socketServes = !http && configured() && pilot != null && tenantId == pilot.tenantId();
+        boolean httpServes = http && props.slack().httpPilotConfigured() && pilot != null
+                && tenantId == pilot.tenantId();
+        if (httpServes) {
+            return status;
+        }
+        if (props.multiTenant() && workspaces != null && !socketServes && !httpServes) {
             return workspaces.forTenant(tenantId)
                     .map(w -> ComponentStatus.up(NAME, "connected to " + w.teamName() + " (events over HTTP)"))
                     .orElseGet(() -> ComponentStatus.off(NAME, "docs0 is not installed in a Slack workspace"));
         }
         if (pilot != null && tenantId != pilot.tenantId()) {
-            return ComponentStatus.off(NAME, "not connected: Socket Mode serves only the configured workspace");
+            return ComponentStatus.off(NAME, http
+                    ? "not connected: only the configured workspace is served"
+                    : "not connected: Socket Mode serves only the configured workspace");
         }
         return status;
     }
 
     @EventListener(ApplicationReadyEvent.class)
     public void start() {
-        if (!configured() || connector != null) {
+        if (connector != null) {
+            return;
+        }
+        if (props.slack() != null && props.slack().httpTransport()) {
+            // No Socket Mode over HTTP. The workspace is registered in the background now, and on demand by the
+            // first event if that event arrives while this is still running (see tenantOf).
+            if (props.slack().httpPilotConfigured() && pilot != null) {
+                connector = Thread.ofPlatform().name("slack-gateway").daemon(true).start(this::registerUntilUp);
+            }
+            return;
+        }
+        if (!configured() || (props.slack() != null && !props.slack().socketTransport())) {
             return;
         }
         connector = Thread.ofPlatform().name("slack-gateway").daemon(true).start(this::connectUntilUp);
@@ -142,6 +177,69 @@ public class SlackGateway implements StatusContributor {
                 return;
             }
         }
+    }
+
+    /** HTTP transport: registers the pilot workspace, retrying on network trouble like Socket Mode does. */
+    private void registerUntilUp() {
+        while (!stopped && !pilotRegistered) {
+            synchronized (registration) {
+                if (!pilotRegistered) {
+                    failedBefore = false; // the startup loop paces its own retries
+                    registerPilotLocked();
+                }
+            }
+            if (pilotRegistered) {
+                return;
+            }
+            try {
+                Thread.sleep(RETRY_DELAY_MILLIS);
+            } catch (InterruptedException e) {
+                return;
+            }
+        }
+    }
+
+    /** Registers the pilot workspace. Callers hold {@link #registration}. Never throws; sets the status. */
+    private void registerPilotLocked() {
+        try {
+            BoltSlackMessenger.Identity identity = pilot.register();
+            pilotRegistered = true;
+            status = ComponentStatus.up(NAME, "events over HTTP (signing secret set)");
+            log.info("Slack workspace registered for HTTP events: bot user {}", identity.botUserId());
+        } catch (Exception e) {
+            failedBefore = true;
+            lastFailureNanos = nanoClock.getAsLong();
+            status = ComponentStatus.down(NAME, failureReason(e));
+            log.warn("Slack workspace could not be registered: {}", failureReason(e));
+        }
+    }
+
+    /**
+     * An event from a workspace that is not registered yet, in HTTP transport with the pilot's bot token set: the
+     * first message often arrives while the instance is still starting, so the pilot workspace is registered now,
+     * in this thread, instead of dropping the event. One caller registers while the others wait for its result;
+     * after a failure nobody tries again for 30 seconds. True when the workspace may be registered by now.
+     */
+    private boolean registerPilotOnDemand() {
+        Docs0Properties.Slack slack = props.slack();
+        if (slack == null || !slack.httpPilotConfigured() || pilot == null) {
+            return false;
+        }
+        synchronized (registration) {
+            if (pilotRegistered) {
+                return true;
+            }
+            if (failedBefore && nanoClock.getAsLong() - lastFailureNanos < TimeUnit.MILLISECONDS.toNanos(RETRY_DELAY_MILLIS)) {
+                return false;
+            }
+            registerPilotLocked();
+            return pilotRegistered;
+        }
+    }
+
+    /** For tests: the clock the 30-second retry spacing uses. */
+    void useNanoClock(java.util.function.LongSupplier clock) {
+        this.nanoClock = clock;
     }
 
     private void connect() throws Exception {
@@ -209,32 +307,33 @@ public class SlackGateway implements StatusContributor {
 
     // ---- the transport-independent entry points: Socket Mode and HTTP both end here ---------------------------
 
-    void appMention(String teamId, AppMentionEvent event, String eventId) {
-        dispatch(() -> incoming(teamId, fromMention(event, eventId)));
+    CompletableFuture<Void> appMention(String teamId, AppMentionEvent event, String eventId) {
+        return dispatch(() -> incoming(teamId, fromMention(event, eventId)));
     }
 
     /** A message event without a subtype (a person's message). Subtyped messages are not questions. */
-    void message(String teamId, MessageEvent event, String eventId) {
-        dispatch(() -> incoming(teamId, fromMessage(event, eventId)));
+    CompletableFuture<Void> message(String teamId, MessageEvent event, String eventId) {
+        return dispatch(() -> incoming(teamId, fromMessage(event, eventId)));
     }
 
-    void reactionAdded(String teamId, ReactionAddedEvent event) {
-        dispatch(() -> reaction(teamId, fromReactionAdded(event)));
+    CompletableFuture<Void> reactionAdded(String teamId, ReactionAddedEvent event) {
+        return dispatch(() -> reaction(teamId, fromReactionAdded(event)));
     }
 
-    void reactionRemoved(String teamId, ReactionRemovedEvent event) {
-        dispatch(() -> reaction(teamId, fromReactionRemoved(event)));
+    CompletableFuture<Void> reactionRemoved(String teamId, ReactionRemovedEvent event) {
+        return dispatch(() -> reaction(teamId, fromReactionRemoved(event)));
     }
 
     /** A click on a button docs0 posted: a follow-up question, or Create / Cancel under a draft. Others are ignored. */
-    void blockAction(BlockActionPayload payload) {
+    CompletableFuture<Void> blockAction(BlockActionPayload payload) {
         String actionId = payload == null || payload.getActions() == null || payload.getActions().isEmpty() ? null
                 : payload.getActions().get(0).getActionId();
         if (actionId != null && FOLLOW_UP_ACTION.matcher(actionId).matches()) {
-            dispatch(() -> followUp(payload));
+            return dispatch(() -> followUp(payload));
         } else if (actionId != null && DRAFT_ACTION.matcher(actionId).matches()) {
-            dispatch(() -> draftClick(payload));
+            return dispatch(() -> draftClick(payload));
         }
+        return DONE;
     }
 
     /**
@@ -243,6 +342,9 @@ public class SlackGateway implements StatusContributor {
      */
     OptionalLong tenantOf(String teamId) {
         Optional<SlackWorkspaces.Installation> installation = workspaces.byTeamId(teamId);
+        if (installation.isEmpty() && teamId != null && !teamId.isBlank() && registerPilotOnDemand()) {
+            installation = workspaces.byTeamId(teamId);
+        }
         if (installation.isEmpty()) {
             log.info("Slack event from an unknown workspace ignored: team={}", teamId);
             return OptionalLong.empty();
@@ -250,31 +352,40 @@ public class SlackGateway implements StatusContributor {
         return OptionalLong.of(installation.get().tenantId());
     }
 
-    private void incoming(String teamId, IncomingEvent event) {
-        if (event != null) {
-            tenantOf(teamId).ifPresent(tenantId -> handler.handle(tenantId, event.withTeam(teamId)));
+    private CompletableFuture<Void> incoming(String teamId, IncomingEvent event) {
+        if (event == null) {
+            return DONE;
         }
+        OptionalLong tenantId = tenantOf(teamId);
+        return tenantId.isEmpty() ? DONE : handler.handle(tenantId.getAsLong(), event.withTeam(teamId));
     }
 
-    private void reaction(String teamId, ReactionEvent event) {
-        if (event != null) {
-            tenantOf(teamId).ifPresent(tenantId -> reactions.handle(tenantId, event.withTeam(teamId)));
+    private CompletableFuture<Void> reaction(String teamId, ReactionEvent event) {
+        if (event == null) {
+            return DONE;
         }
+        OptionalLong tenantId = tenantOf(teamId);
+        return tenantId.isEmpty() ? DONE : reactions.handle(tenantId.getAsLong(), event.withTeam(teamId));
     }
 
-    /** Hands an event to the handler without ever failing the acknowledgement. */
-    private void dispatch(Runnable handoff) {
+    /**
+     * Hands an event to the handler without ever failing the acknowledgement. The returned future completes when the
+     * handler has finished with the event; HTTP transport waits for it before answering Slack.
+     */
+    private CompletableFuture<Void> dispatch(java.util.function.Supplier<CompletableFuture<Void>> handoff) {
         try {
-            handoff.run();
+            CompletableFuture<Void> work = handoff.get();
+            return work == null ? DONE : work;
         } catch (Exception e) {
             log.warn("Slack event could not be queued: {}", e.getClass().getName());
+            return DONE;
         }
     }
 
-    private void followUp(BlockActionPayload payload) {
+    private CompletableFuture<Void> followUp(BlockActionPayload payload) {
         if (payload == null || payload.getActions() == null || payload.getActions().isEmpty()
                 || payload.getUser() == null) {
-            return;
+            return DONE;
         }
         BlockActionPayload.Action action = payload.getActions().get(0);
         BlockActionPayload.Container container = payload.getContainer();
@@ -285,18 +396,21 @@ public class SlackGateway implements StatusContributor {
         String threadTs = payload.getMessage() != null && payload.getMessage().getThreadTs() != null
                 ? payload.getMessage().getThreadTs()
                 : container != null ? container.getThreadTs() : null;
-        tenantOf(teamOf(payload)).ifPresent(tenantId -> handler.followUp(tenantId, channel,
+        OptionalLong tenantId = tenantOf(teamOf(payload));
+        return tenantId.isEmpty() ? DONE : handler.followUp(tenantId.getAsLong(), channel,
                 followUpThread(channel, threadTs, messageTs), payload.getUser().getId(), action.getValue(),
-                payload.getUser().getId() + ":" + messageTs + ":" + action.getActionTs()));
+                payload.getUser().getId() + ":" + messageTs + ":" + action.getActionTs());
     }
 
     /** A click on Create or Cancel under a draft. */
-    private void draftClick(BlockActionPayload payload) {
+    private CompletableFuture<Void> draftClick(BlockActionPayload payload) {
         DraftClick click = fromDraftClick(payload);
-        if (click != null) {
-            tenantOf(teamOf(payload)).ifPresent(tenantId -> draftActions.handle(tenantId, click.channel(),
-                    click.messageTs(), click.threadTs(), click.user(), click.actionId(), click.value()));
+        if (click == null) {
+            return DONE;
         }
+        OptionalLong tenantId = tenantOf(teamOf(payload));
+        return tenantId.isEmpty() ? DONE : draftActions.handle(tenantId.getAsLong(), click.channel(),
+                click.messageTs(), click.threadTs(), click.user(), click.actionId(), click.value());
     }
 
     /** The workspace a button click came from. */
