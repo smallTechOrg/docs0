@@ -1,0 +1,57 @@
+# Tests never use real credentials: every integration is forced off here,
+# overriding anything a local .env would supply.
+spring:
+  datasource:
+    url: ${DOCS0_TEST_DATABASE_URL:jdbc:postgresql://localhost:5432/docs0_test}
+    hikari:
+      # Many cached application contexts share one small Postgres: keep idle connections to a minimum.
+      minimum-idle: 1
+      maximum-pool-size: 6
+  flyway:
+    clean-disabled: false
+
+docs0:
+  anthropic:
+    api-key: ""
+    model: claude-sonnet-5-5
+    input-price-per-mtok: 2.00
+    output-price-per-mtok: 10.00
+    max-steps: 12
+  budget:
+    monthly-usd: 100
+  new-tenant-budget-usd: ""
+  slack:
+    bot-token: ""
+    app-token: ""
+    client-id: ""
+    client-secret: ""
+    signing-secret: ""
+    transport: socket
+    hold-open-seconds: 270
+  scheduler:
+    enabled: true
+  hosted:
+    sync-job-name: ""
+    gcp-project: ""
+    gcp-region: ""
+  drive:
+    sync-on-startup: false
+  slack-history:
+    days: 3
+  grain:
+    days: 30
+  gmail:
+    days: 7
+  proactive:
+    max-per-hour: 3
+  stale:
+    days: 365
+  digest:
+    cron: "-"
+    zone: UTC
+  google:
+    oauth-client-id: ""
+    oauth-client-secret: ""
+  encryption-key: ""
+  public-url: http://localhost:8080
+  admin-password: ""

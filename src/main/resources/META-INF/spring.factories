@@ -1,0 +1,1 @@
+org.springframework.boot.EnvironmentPostProcessor=com.docs0.config.DatabaseBootstrapPostProcessor

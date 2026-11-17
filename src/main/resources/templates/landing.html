@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>docs0: answers from your company's docs, in Slack</title>
+  <th:block th:replace="~{admin/fragments :: styles}"></th:block>
+</head>
+<body>
+<main>
+  <h1>docs0</h1>
+  <p class="sub">A Slack assistant that answers from your company's own docs.</p>
+
+  <div class="card pad" style="margin-top:20px" id="about">
+    <p>Ask a question in Slack and docs0 answers from your Google Drive, Linear, Trello and other sources.</p>
+    <p>Every answer shows where it came from, and people only see what they already have access to.</p>
+    <p>Your company's data stays separate from every other company's.</p>
+  </div>
+
+  <p style="margin-top:20px">
+    <a class="button primary" id="add-to-slack" href="/slack/install">Add to Slack</a>
+    <a class="button" id="sign-in" href="/admin/login">Sign in</a>
+  </p>
+  <p class="sub">Already installed? Sign in with Slack to connect your docs and manage docs0.</p>
+</main>
+</body>
+</html>

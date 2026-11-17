@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<head><meta charset="utf-8"><title>docs0 Gmail section</title></head>
+<body>
+<!-- The Gmail section of the Sources page: service account key, mailboxes, access check, sync. -->
+<th:block th:fragment="gmail(p)">
+  <h2 id="gmail">Gmail</h2>
+
+  <!-- Cannot store a secret yet -->
+  <div class="card pad" th:if="${p.state == 'setup'}" id="gmail-setup">
+    <p><b>Gmail needs a one-time setup before it can be connected.</b></p>
+    <p>Add <code>DOCS0_ENCRYPTION_KEY</code> to the <code>.env</code> file and restart docs0. It is 32 random
+      bytes in base64; make one with <code>openssl rand -base64 32</code>. docs0 encrypts the key you paste
+      with it.</p>
+  </div>
+
+  <!-- Not connected -->
+  <div class="card pad" th:if="${p.state == 'disconnected'}" id="gmail-not-connected">
+    <p><b>Gmail is not connected.</b></p>
+    <p>docs0 reads the mailboxes you choose, and nothing else. <b>docs0 can read every mailbox you add</b>, but a
+      person's mail is only ever shown to that person, in their own direct message with docs0 (plus anyone you
+      list for a shared inbox such as support@). It is never used in a channel or for anyone else. docs0 only reads
+      mail: it cannot send, change or delete anything. Only the last <span th:text="${p.days}">90</span> days are
+      indexed, without spam, trash, drafts, Promotions, Social and Forums.</p>
+    <p>You need to be a Google Workspace administrator for these steps.</p>
+    <ol>
+      <li>In <a href="https://console.cloud.google.com/" target="_blank" rel="noopener noreferrer">Google Cloud Console</a>
+        make a project (or pick one), then under <b>APIs &amp; Services → Library</b> turn on the <b>Gmail API</b>.
+        If you want to load your people from Google Workspace later, turn on the <b>Admin SDK API</b> too.</li>
+      <li>Under <b>IAM &amp; Admin → Service Accounts</b> create a service account (any name, no roles needed).
+        Open it, choose <b>Keys → Add key → Create new key → JSON</b>. A file downloads.</li>
+      <li>Open that file in a text editor, copy everything in it and paste it below. docs0 checks it and stores it
+        encrypted. It is never shown again.</li>
+      <li>After saving, this page shows the service account's <b>client ID</b> and the last step: letting Google
+        Workspace trust the account.</li>
+    </ol>
+    <form method="post" action="/admin/sources/gmail/connect">
+      <input type="hidden" name="_csrf" th:value="${csrf}">
+      <p><textarea name="key" rows="6" placeholder="Paste the contents of the JSON key file here" autocomplete="off"
+                   required spellcheck="false"
+                   style="width:100%;font:12px ui-monospace,monospace;padding:8px 10px;border-radius:8px;border:1px solid var(--line);background:var(--bg);color:var(--text)"></textarea></p>
+      <button class="primary" type="submit">Save key</button>
+    </form>
+  </div>
+
+  <!-- Connected -->
+  <th:block th:if="${p.state == 'connected'}">
+    <div class="card" id="gmail-connected">
+      <div class="row">
+        <div class="detail">Service account <b th:text="${p.serviceAccount}">sa@project.iam.gserviceaccount.com</b> ·
+          <span th:text="${p.documents}">0</span> mail threads indexed. The key is stored encrypted and is not shown.</div>
+        <div class="actions" th:if="${!p.confirmDisconnect}">
+          <a class="button danger" href="/admin/sources?confirm=gmail#gmail">Disconnect</a>
+        </div>
+      </div>
+      <div class="row" th:if="${p.confirmDisconnect}" id="gmail-confirm-disconnect">
+        <div class="detail"><b>Disconnect Gmail?</b> docs0 deletes the key and stops using any mail in answers.
+          You can connect again later.</div>
+        <div class="actions">
+          <form method="post" action="/admin/sources/gmail/disconnect">
+            <input type="hidden" name="_csrf" th:value="${csrf}">
+            <button class="danger" type="submit">Yes, disconnect</button>
+          </form>
+          <a class="button" href="/admin/sources#gmail">Cancel</a>
+        </div>
+      </div>
+    </div>
+
+    <div class="card pad" id="gmail-delegation">
+      <p><b>Let Google Workspace trust this account</b> (one time, as an administrator):</p>
+      <ol>
+        <li>Open the <a href="https://admin.google.com/ac/owl/domainwidedelegation" target="_blank" rel="noopener noreferrer">Admin console → Security → Access and data control → API controls → Domain-wide delegation</a>
+          and choose <b>Add new</b>.</li>
+        <li>Client ID: copy this number.
+          <input type="text" readonly id="gmail-client-id" th:value="${p.clientId}" onclick="this.select()"
+                 style="width:100%;margin-top:4px;font:13px ui-monospace,monospace;padding:6px 8px;border-radius:8px;border:1px solid var(--line);background:var(--bg);color:var(--text)"></li>
+        <li>OAuth scopes: <code>https://www.googleapis.com/auth/gmail.readonly</code><br>
+          Only if you want to load your people from Google Workspace below, add a second scope, separated by a
+          comma: <code>https://www.googleapis.com/auth/admin.directory.user.readonly</code></li>
+        <li>Choose <b>Authorise</b>, then come back and press <b>Check access</b> below.</li>
+      </ol>
+      <p class="sub">docs0 can read every mailbox you add. A person's mail is only ever shown to them, in their own
+        direct message with docs0. For this, people need their email visible to the Slack app (see the README).
+        Only the last <span th:text="${p.days}">90</span> days are indexed, without spam, trash, drafts,
+        Promotions, Social and Forums.</p>
+      <details>
+        <summary>Replace the key</summary>
+        <form method="post" action="/admin/sources/gmail/connect" style="margin-top:8px">
+          <input type="hidden" name="_csrf" th:value="${csrf}">
+          <p><textarea name="key" rows="4" placeholder="Paste the contents of the new JSON key file" autocomplete="off"
+                       required spellcheck="false"
+                       style="width:100%;font:12px ui-monospace,monospace;padding:8px 10px;border-radius:8px;border:1px solid var(--line);background:var(--bg);color:var(--text)"></textarea></p>
+          <button type="submit">Save new key</button>
+        </form>
+      </details>
+    </div>
+
+    <h3 style="padding-left:0;margin-top:16px">Mailboxes to include</h3>
+    <div class="card pad" id="gmail-directory">
+      <p>Add people from your Google Workspace: give the email of an administrator for docs0 to act as, then
+        load the list.</p>
+      <form method="post" action="/admin/sources/gmail/directory">
+        <input type="hidden" name="_csrf" th:value="${csrf}">
+        <p><input type="email" name="adminEmail" th:value="${p.adminEmail}" placeholder="admin@yourcompany.com" required
+                  style="width:100%;font:inherit;padding:8px 10px;border-radius:8px;border:1px solid var(--line);background:var(--bg);color:var(--text)"></p>
+        <button type="submit">Load people from Google Workspace</button>
+      </form>
+    </div>
+
+    <form method="post" action="/admin/sources/gmail/mailboxes">
+      <input type="hidden" name="_csrf" th:value="${csrf}">
+      <div class="card" id="gmail-choices">
+        <div class="empty" th:if="${p.rows.isEmpty()}">No mailboxes yet. Type some below, or load people from
+          Google Workspace above.</div>
+        <div class="row" th:each="r : ${p.rows}" style="align-items:flex-start;gap:12px">
+          <label style="cursor:pointer;display:flex;gap:8px;align-items:center">
+            <input type="checkbox" name="mailbox" th:value="${r.email}" th:checked="${r.chosen}">
+            <span class="name"><span th:text="${r.email}">sam@example.com</span>
+              <span class="detail" th:if="${!r.name.isEmpty()}" th:text="${'· ' + r.name}">Sam</span></span>
+          </label>
+          <span class="detail DOWN" th:if="${r.note != null}" th:text="${r.note}">note</span>
+          <label class="detail" th:if="${r.chosen}">Also visible to
+            <input type="text" th:name="${'viewers:' + r.email}" th:value="${r.viewers}" placeholder="optional, e.g. a@x.com, b@x.com"
+                   style="font:inherit;padding:4px 8px;border-radius:8px;border:1px solid var(--line);background:var(--bg);color:var(--text);min-width:260px"></label>
+        </div>
+      </div>
+      <p style="margin-top:10px"><label class="label" for="gmail-new">Add mailboxes by email, one per line</label>
+        <textarea name="newMailboxes" id="gmail-new" rows="3" placeholder="sam@yourcompany.com"
+                  style="width:100%;font:inherit;padding:8px 10px;border-radius:8px;border:1px solid var(--line);background:var(--bg);color:var(--text)"></textarea></p>
+      <p><button class="primary" type="submit">Save</button></p>
+    </form>
+    <p class="sub" style="margin-top:8px">Nothing is indexed until you choose at least one mailbox. Each mailbox is
+      private to its owner. For a shared inbox such as support@, put the people who may also see it in
+      <b>Also visible to</b>. Removing a mailbox or a person takes effect at the next sync.</p>
+
+    <h3 style="padding-left:0;margin-top:16px">Sync</h3>
+    <div class="card msg notice" th:if="${gmailCheck != null}" id="gmail-check">
+      <div th:each="c : ${gmailCheck}">
+        <b class="UP" th:if="${c.ok}">✓</b><b class="DOWN" th:if="${!c.ok}">✗</b>
+        <span th:text="${c.email}">sam@example.com</span>:
+        <span th:text="${c.text}">1,234 messages</span>
+      </div>
+    </div>
+    <div class="card" id="gmail-sync">
+      <div class="row">
+        <div class="detail" th:if="${p.syncRunning}"><b class="OFF">Sync running…</b> This page refreshes by itself.</div>
+        <div class="detail" th:if="${!p.syncRunning}">docs0 syncs by itself every few minutes. Check access tries
+          each chosen mailbox once and shows how many messages it holds, or what is wrong.</div>
+        <div class="actions" th:if="${!p.syncRunning}">
+          <form method="post" action="/admin/sources/gmail/check">
+            <input type="hidden" name="_csrf" th:value="${csrf}">
+            <button type="submit">Check access</button>
+          </form>
+          <form method="post" action="/admin/sources/gmail/sync">
+            <input type="hidden" name="_csrf" th:value="${csrf}">
+            <button class="primary" type="submit">Sync now</button>
+          </form>
+        </div>
+      </div>
+      <div class="row" th:each="r : ${p.runs}">
+        <div class="detail">
+          <span th:text="${r.started}">time</span>
+          · <span th:text="${r.run.counts.added}">0</span> added
+          · <span th:text="${r.run.counts.updated}">0</span> updated
+          · <span th:text="${r.run.counts.removed}">0</span> removed
+          · <span th:text="${r.run.counts.failed}">0</span> failed
+          <span th:if="${r.run.error != null}" class="DOWN" th:text="${' · ' + r.run.error}"></span>
+        </div>
+        <div class="state" th:classappend="${r.state}" th:text="${r.label}">Complete</div>
+      </div>
+      <div class="empty" th:if="${p.runs.isEmpty()}">No sync has run yet.</div>
+    </div>
+  </th:block>
+</th:block>
+</body>
+</html>

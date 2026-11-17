@@ -1,0 +1,109 @@
+spring:
+  application:
+    name: docs0
+  config:
+    # Local secrets. Optional: the app boots without it.
+    import: "optional:file:.env[.properties]"
+  datasource:
+    url: ${DOCS0_DATABASE_URL:jdbc:postgresql://localhost:5432/docs0}
+    username: ${DOCS0_DATABASE_USER:${user.name}}
+    password: ${DOCS0_DATABASE_PASSWORD:}
+    hikari:
+      # The Cloud SQL instance is shared by about ten apps and allows 90 connections in all, so each app keeps a
+      # small pool (default 5, raise with DOCS0_DB_POOL_MAX) and hands idle connections back.
+      maximum-pool-size: ${DOCS0_DB_POOL_MAX:5}
+      minimum-idle: 1
+      connection-timeout: 10000
+      idle-timeout: 300000
+      max-lifetime: 1500000
+  flyway:
+    enabled: true
+  threads:
+    virtual:
+      enabled: true
+  lifecycle:
+    timeout-per-shutdown-phase: 25s
+
+server:
+  # Cloud Run injects PORT.
+  port: ${PORT:${DOCS0_PORT:8080}}
+  # Let in-flight requests finish on shutdown; the Slack Socket Mode connection closes in a @PreDestroy.
+  shutdown: graceful
+
+docs0:
+  database:
+    # true: on start, create the database named in DOCS0_DATABASE_URL if it is missing (the role needs CREATEDB).
+    auto-create: ${DOCS0_AUTO_CREATE_DATABASE:false}
+  tenant:
+    slug: ${DOCS0_TENANT_SLUG:smalltech}
+    name: ${DOCS0_TENANT_NAME:smallTech}
+  anthropic:
+    api-key: ${DOCS0_ANTHROPIC_API_KEY:}
+    model: ${DOCS0_ANTHROPIC_MODEL:claude-sonnet-5-5}
+    # USD per million tokens, used to compute cost per answer.
+    input-price-per-mtok: ${DOCS0_ANTHROPIC_INPUT_PRICE:2.00}
+    output-price-per-mtok: ${DOCS0_ANTHROPIC_OUTPUT_PRICE:10.00}
+    max-steps: ${DOCS0_AGENT_MAX_STEPS:12}
+  budget:
+    # Hard monthly spend cap per tenant, in USD. 0 disables the cap.
+    monthly-usd: ${DOCS0_MONTHLY_BUDGET_USD:100}
+  # Monthly cap in USD for a company that installs docs0 itself (Add to Slack). 0 refuses every question. The
+  # pilot company uses the global cap above. Blank: 5.
+  new-tenant-budget-usd: ${DOCS0_NEW_TENANT_BUDGET_USD:5}
+  slack:
+    bot-token: ${DOCS0_SLACK_BOT_TOKEN:}
+    app-token: ${DOCS0_SLACK_APP_TOKEN:}
+    # Distributed app (several companies). All three set = multi-tenant mode: Add to Slack, Slack events over HTTP,
+    # Sign in with Slack for admins. Leave blank for the single-company Socket Mode pilot.
+    client-id: ${DOCS0_SLACK_CLIENT_ID:}
+    client-secret: ${DOCS0_SLACK_CLIENT_SECRET:}
+    signing-secret: ${DOCS0_SLACK_SIGNING_SECRET:}
+    # How Slack reaches the single-company app: "socket" (Socket Mode, the laptop pilot) or "http" (hosted on Cloud
+    # Run: events and button clicks POST to /slack/events and /slack/interactions, signed with the signing secret).
+    transport: ${DOCS0_SLACK_TRANSPORT:socket}
+    # http transport: a Slack request is held open until its work is finished, at most this many seconds (keep it
+    # under the Cloud Run request timeout, 300).
+    hold-open-seconds: ${DOCS0_SLACK_HOLD_OPEN_SECONDS:270}
+  scheduler:
+    # false: nothing runs on a timer inside this process (no source sync, no weekly digest). Hosted mode runs them
+    # as Cloud Run Jobs instead.
+    enabled: ${DOCS0_INTERNAL_SCHEDULER:true}
+  hosted:
+    # Cloud Run Job that the Sources page "Sync now" button starts. Empty: "Sync now" syncs inside this process.
+    sync-job-name: ${DOCS0_SYNC_JOB_NAME:}
+    gcp-project: ${DOCS0_GCP_PROJECT:}
+    gcp-region: ${DOCS0_GCP_REGION:}
+  drive:
+    sync-interval-minutes: ${DOCS0_DRIVE_SYNC_INTERVAL_MINUTES:15}
+    sync-on-startup: ${DOCS0_DRIVE_SYNC_ON_STARTUP:true}
+  slack-history:
+    # How many days of channel history the Slack history source indexes.
+    days: ${DOCS0_SLACK_HISTORY_DAYS:180}
+  grain:
+    # How many days of Grain recordings (notes and transcripts) are indexed.
+    days: ${DOCS0_GRAIN_HISTORY_DAYS:365}
+  gmail:
+    # How many days of mail (threads) are indexed for each chosen mailbox.
+    days: ${DOCS0_GMAIL_HISTORY_DAYS:90}
+  google:
+    # OAuth client an admin signs in through on the Sources page.
+    oauth-client-id: ${DOCS0_GOOGLE_OAUTH_CLIENT_ID:}
+    oauth-client-secret: ${DOCS0_GOOGLE_OAUTH_CLIENT_SECRET:}
+  proactive:
+    # Most unprompted repeat-question answers per channel per hour (only in channels an admin opted in).
+    max-per-hour: ${DOCS0_PROACTIVE_MAX_PER_HOUR:3}
+  stale:
+    # An answer that cites a document last updated more than this many days ago says it may be out of date.
+    days: ${DOCS0_STALE_DAYS:365}
+  digest:
+    # When the weekly digest is posted (Spring cron: second minute hour day month weekday). "-" turns it off.
+    cron: ${DOCS0_DIGEST_CRON:0 0 9 * * MON}
+    # Time zone of the cron schedule.
+    zone: ${DOCS0_TIMEZONE:UTC}
+  # Base64 of 32 random bytes. Encrypts the stored Google grant.
+  encryption-key: ${DOCS0_ENCRYPTION_KEY:}
+  # Where a browser reaches this app. The Google redirect URI is <public-url>/admin/sources/google/callback.
+  public-url: ${DOCS0_PUBLIC_URL:http://localhost:${server.port}}
+  # Password for /admin pages (user "admin"). Empty: /admin is served to the local machine only. Set: the status
+  # page "/" needs it too and /health shows only UP (hosted mode).
+  admin-password: ${DOCS0_ADMIN_PASSWORD:}

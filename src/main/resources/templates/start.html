@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <title>docs0 start</title>
+  <th:block th:replace="~{admin/fragments :: styles}"></th:block>
+</head>
+<body>
+<main>
+  <nav th:replace="~{admin/fragments :: nav('start')}"></nav>
+  <h1>Get started</h1>
+  <p class="sub">Setting up docs0 for <span th:text="${tenantName}">your company</span>.</p>
+
+  <div class="card pad msg notice" th:if="${notice}" th:text="${notice}">Saved.</div>
+  <div class="card pad msg error" th:if="${error}" th:text="${error}">Something went wrong.</div>
+
+  <h2>1. Slack</h2>
+  <div class="card" id="step-slack">
+    <div class="row" th:if="${slackConnected}">
+      <div class="name">Slack is connected</div>
+      <div class="detail"><span th:text="${botName}">docs0</span> is in <span th:text="${slackTeam}">your workspace</span>.</div>
+      <div class="state UP">&#10003; Done</div>
+    </div>
+    <div class="row" th:unless="${slackConnected}">
+      <div class="name">Slack is not connected</div>
+      <div class="detail">docs0 was removed from the workspace. <a href="/slack/install">Add it again.</a></div>
+      <div class="state DOWN">Needs attention</div>
+    </div>
+  </div>
+
+  <h2>2. Add knowledge</h2>
+  <div class="card" id="step-sources">
+    <div class="row" th:each="s : ${sources}">
+      <div class="name" th:text="${s.name}">Google Drive</div>
+      <div class="detail" th:text="${s.status.detail}">detail</div>
+      <div class="state" th:classappend="${s.status.state.name()}"
+           th:text="${s.status.state.name() == 'UP' ? 'Connected' : (s.status.state.name() == 'OFF' ? 'Not set up' : 'Failing')}">state</div>
+      <a class="button" th:href="${'/admin/sources#' + s.anchor}">Open</a>
+    </div>
+  </div>
+
+  <h2>3. Invite docs0 to channels</h2>
+  <div class="card pad" id="step-invite">
+    <p>docs0 only reads the channels it is in. In a channel, type <code>/invite @docs0</code>.</p>
+  </div>
+
+  <h2>4. Try it</h2>
+  <div class="card pad" id="step-try">
+    <p>In a channel docs0 is in, ask something your docs can answer, for example:</p>
+    <p><code>@docs0 how many days of parental leave do we offer?</code></p>
+    <p class="sub">You can also send docs0 a direct message.</p>
+  </div>
+
+  <h2 id="admins">Admins</h2>
+  <div class="card" id="admins-list">
+    <div class="row">
+      <div class="detail">Anyone who is a Slack workspace admin or owner can always sign in. These emails can too.</div>
+    </div>
+    <div class="row" th:if="${admins.isEmpty()}"><div class="detail">No emails added yet.</div></div>
+    <div class="row" th:each="a : ${admins}">
+      <div class="name" th:text="${a}">sam@example.com</div>
+      <form method="post" action="/admin/start/admins/remove">
+        <input type="hidden" name="_csrf" th:value="${csrf}">
+        <input type="hidden" name="email" th:value="${a}">
+        <button type="submit" class="danger">Remove</button>
+      </form>
+    </div>
+    <div class="row" th:if="${canAddAdmin}">
+      <form method="post" action="/admin/start/admins/add" class="actions">
+        <input type="hidden" name="_csrf" th:value="${csrf}">
+        <input type="email" name="email" placeholder="sam@yourcompany.com" maxlength="254" required
+               style="font:inherit;padding:7px 10px;border-radius:8px;border:1px solid var(--line);background:var(--bg);color:var(--text)">
+        <button type="submit" class="primary">Add admin</button>
+      </form>
+    </div>
+    <div class="row" th:unless="${canAddAdmin}">
+      <div class="detail">The list is full (<span th:text="${maxAdmins}">20</span> emails). Remove one to add another.</div>
+    </div>
+  </div>
+
+  <h2>Budget</h2>
+  <div class="card pad" id="budget">
+    <p>This month docs0 has spent $<span th:text="${#numbers.formatDecimal(spent, 1, 'COMMA', 2, 'POINT')}">0.00</span><span
+      th:if="${cap != null}"> of the $<span th:text="${#numbers.formatDecimal(cap, 1, 'COMMA', 2, 'POINT')}">100.00</span> monthly cap</span><span
+      th:if="${cap == null}"> (no monthly cap is set)</span>. <a href="/admin/costs">See the details.</a></p>
+  </div>
+</main>
+</body>
+</html>

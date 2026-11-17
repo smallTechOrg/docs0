@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="refresh" content="15">
+  <title>docs0 status</title>
+  <style>
+    :root { --bg:#f7f7f5; --card:#fff; --text:#1c1c1a; --muted:#6b6b66; --line:#e4e4df;
+            --up:#1a7f4b; --off:#8a6d00; --down:#b3261e; }
+    @media (prefers-color-scheme: dark) {
+      :root { --bg:#151514; --card:#1f1f1d; --text:#ecece8; --muted:#a0a09a; --line:#33332f;
+              --up:#5fd08f; --off:#e0be4a; --down:#ff8a80; }
+    }
+    * { box-sizing: border-box; }
+    body { margin:0; background:var(--bg); color:var(--text);
+           font:15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    main { max-width:760px; margin:0 auto; padding:32px 16px 48px; }
+    h1 { font-size:22px; margin:0 0 4px; }
+    h2 { font-size:13px; text-transform:uppercase; letter-spacing:.06em; color:var(--muted); margin:28px 0 8px; }
+    .sub { color:var(--muted); margin:0; }
+    a { color:inherit; }
+    .card { background:var(--card); border:1px solid var(--line); border-radius:10px; }
+    .row { display:flex; gap:12px; align-items:baseline; padding:12px 16px; border-top:1px solid var(--line); }
+    .row:first-child { border-top:0; }
+    .name { flex:0 0 130px; font-weight:600; }
+    .detail { flex:1; color:var(--muted); overflow-wrap:anywhere; }
+    .state { font-weight:600; font-size:13px; }
+    .UP { color:var(--up); } .OFF { color:var(--off); } .DOWN { color:var(--down); }
+    .stats { display:grid; grid-template-columns:repeat(auto-fit, minmax(150px, 1fr)); gap:12px; }
+    .stat { padding:14px 16px; }
+    .stat b { display:block; font-size:24px; font-variant-numeric:tabular-nums; }
+    .stat span { color:var(--muted); font-size:13px; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>docs0</h1>
+  <p class="sub">Knowledge agent for <span th:text="${s.tenantName}">tenant</span> ·
+    <a href="/admin/sources">Sources</a> · <a href="/admin/corrections">Corrections</a> ·
+    <a href="/admin/costs">Costs</a></p>
+
+  <h2>At a glance</h2>
+  <div class="stats">
+    <div class="card stat"><b th:text="${s.documents}">0</b><span>documents indexed</span></div>
+    <div class="card stat"><b th:text="${s.questions}">0</b><span>questions answered</span></div>
+    <div class="card stat"><a href="/admin/corrections" style="text-decoration:none">
+      <b th:text="${s.pendingCorrections}">0</b><span>pending corrections</span></a></div>
+    <div class="card stat">
+      <b>$<span th:text="${#numbers.formatDecimal(s.spentThisMonth, 1, 2)}">0.00</span></b>
+      <span th:if="${s.monthlyCap != null}">spent this month of $<span th:text="${#numbers.formatDecimal(s.monthlyCap, 1, 0)}">100</span> cap</span>
+      <span th:if="${s.monthlyCap == null}">spent this month (no cap)</span>
+    </div>
+  </div>
+
+  <h2>Connections</h2>
+  <div class="card">
+    <div class="row" th:each="c : ${s.components}">
+      <div class="name" th:text="${c.name}">Slack</div>
+      <div class="detail" th:text="${c.detail}">detail</div>
+      <div class="state" th:classappend="${c.state.name()}"
+           th:text="${c.state.name() == 'UP' ? 'Connected' : (c.state.name() == 'OFF' ? 'Not set up' : 'Failing')}">state</div>
+    </div>
+  </div>
+
+  <h2>Last sync</h2>
+  <div class="card">
+    <div class="row" th:if="${s.lastSync.isEmpty()}">
+      <div class="detail">No sync has run yet.</div>
+    </div>
+    <th:block th:if="${s.lastSync.isPresent()}" th:with="r=${s.lastSync.get()}">
+      <div class="row">
+        <div class="name" th:text="${r.sourceName}">Google Drive</div>
+        <div class="detail">
+          started <span th:text="${#temporals.formatISO(r.startedAt)}">time</span>
+          · <span th:text="${r.added}">0</span> added
+          · <span th:text="${r.updated}">0</span> updated
+          · <span th:text="${r.removed}">0</span> removed
+          · <span th:text="${r.skipped}">0</span> skipped
+          · <span th:text="${r.failed}">0</span> failed
+          <span th:if="${r.error != null}" th:text="${' · ' + r.error}"></span>
+        </div>
+        <div class="state" th:classappend="${r.status == 'OK' ? 'UP' : (r.status == 'RUNNING' ? 'OFF' : 'DOWN')}"
+             th:text="${r.status == 'OK' ? 'Complete' : (r.status == 'RUNNING' ? 'Running' : 'Failed')}">OK</div>
+      </div>
+    </th:block>
+  </div>
+</main>
+</body>
+</html>

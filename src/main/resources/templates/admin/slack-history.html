@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<head><meta charset="utf-8"><title>docs0 Slack history section</title></head>
+<body>
+<!-- The Slack history section of the Sources page: choose channels, check access, sync. -->
+<th:block th:fragment="slack(p)">
+  <h2 id="slack">Slack history</h2>
+
+  <!-- No bot token -->
+  <div class="card pad" th:if="${p.state == 'off'}" id="slack-off">
+    <p><b>Slack is not connected.</b></p>
+    <p>Add <code>DOCS0_SLACK_BOT_TOKEN</code> to the <code>.env</code> file and restart docs0. The README has the
+      steps for creating the Slack app.</p>
+  </div>
+
+  <th:block th:if="${p.state == 'connected'}">
+    <div class="card" id="slack-connected">
+      <div class="row">
+        <div class="detail"><b class="UP" th:if="${p.error == null}">Slack is connected.</b>
+          <b class="DOWN" th:if="${p.error != null}">Slack could not be asked.</b>
+          <span th:text="${p.documents}">0</span> documents indexed. Direct messages and group messages are never
+          indexed.</div>
+      </div>
+    </div>
+
+    <div class="card msg error" th:if="${p.error != null}" id="slack-error" th:text="${p.error}">error</div>
+    <div class="card msg error" th:if="${p.emailWarning}" id="slack-email-warning">docs0 cannot read email
+      addresses yet, so people are matched by Slack user id only. This works, but add the
+      <code>users:read.email</code> scope to the Slack app and reinstall it to match by email too. The README
+      has the steps.</div>
+
+    <h3 style="padding-left:0;margin-top:16px">Channels to include</h3>
+    <form method="post" action="/admin/sources/slack/channels" th:if="${p.channels != null}">
+      <input type="hidden" name="_csrf" th:value="${csrf}">
+      <div class="card" id="slack-choices">
+        <div class="empty" th:if="${p.channels.isEmpty()}">docs0 cannot see any channels yet. Public channels
+          show up here; for a private one, invite docs0 to it first.</div>
+        <label class="row" th:each="c : ${p.channels}" style="cursor:pointer">
+          <input type="checkbox" name="choice" th:value="${c.id}" th:checked="${c.chosen}">
+          <span class="name"><span th:if="${c.isPrivate}" title="Private channel">🔒 </span>#<span th:text="${c.name}">general</span></span>
+          <span class="detail" th:if="${c.note != null}" th:text="${c.note}">note</span>
+          <span class="detail" th:if="${c.isPrivate and c.note == null}">Private: only used in answers shown to people who are all in this channel.</span>
+        </label>
+      </div>
+      <p style="margin-top:10px"><button class="primary" type="submit">Save</button></p>
+    </form>
+    <p class="sub" style="margin-top:8px">Nothing is indexed until you tick at least one. 🔒 Private channels are
+      indexed too, but their messages are only used in answers shown to people who are all in that channel. To
+      include a private channel, invite docs0 to it first (<code>/invite @docs0</code>).</p>
+
+    <h3 style="padding-left:0;margin-top:16px">Sync</h3>
+    <div class="card" id="slack-sync">
+      <div class="row">
+        <div class="detail" th:if="${p.syncRunning}"><b class="OFF">Sync running…</b> This page refreshes by itself.</div>
+        <div class="detail" th:if="${!p.syncRunning}">docs0 syncs by itself every few minutes. Check access
+          shows how much it can read from each chosen channel.</div>
+        <div class="actions" th:if="${!p.syncRunning}">
+          <form method="post" action="/admin/sources/slack/check">
+            <input type="hidden" name="_csrf" th:value="${csrf}">
+            <button type="submit">Check access</button>
+          </form>
+          <form method="post" action="/admin/sources/slack/sync">
+            <input type="hidden" name="_csrf" th:value="${csrf}">
+            <button class="primary" type="submit">Sync now</button>
+          </form>
+        </div>
+      </div>
+      <div class="row" th:each="r : ${p.runs}">
+        <div class="detail">
+          <span th:text="${r.started}">time</span>
+          · <span th:text="${r.run.counts.added}">0</span> added
+          · <span th:text="${r.run.counts.updated}">0</span> updated
+          · <span th:text="${r.run.counts.removed}">0</span> removed
+          · <span th:text="${r.run.counts.skipped}">0</span> skipped
+          · <span th:text="${r.run.counts.failed}">0</span> failed
+          <span th:if="${r.run.error != null}" class="DOWN" th:text="${' · ' + r.run.error}"></span>
+        </div>
+        <div class="state" th:classappend="${r.state}" th:text="${r.label}">Complete</div>
+      </div>
+      <div class="empty" th:if="${p.runs.isEmpty()}">No sync has run yet.</div>
+    </div>
+  </th:block>
+</th:block>
+</body>
+</html>

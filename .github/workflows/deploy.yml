@@ -1,0 +1,113 @@
+name: Deploy
+
+# Deploys the Cloud Run service `docs0` (project ai-agent-boilerplate0) with deploy/deploy.sh.
+#   - on demand: GitHub -> Actions -> Deploy -> "Run workflow" (pick the branch), or
+#       gh workflow run deploy.yml --ref <branch> [-f dry_run=true] [-f steps="deploy jobs"]
+#   - automatically on a push to main (see the comment on `push` below).
+# Auth is keyless (Workload Identity Federation, provider `docs0-github` in pool `github`, restricted to this
+# repository; created once by `deploy/deploy.sh --apply --step wif`). No service-account key is stored anywhere.
+# All configuration comes from the GitHub environment `production`: secrets and variables are handed to
+# deploy/deploy.sh as environment variables and end up as plain environment variables on Cloud Run
+# (there is no Secret Manager). See README "Deploying to Cloud Run".
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Dry run: print the gcloud commands, change nothing"
+        type: boolean
+        default: false
+      steps:
+        description: "deploy.sh steps, space separated (wif and domain are one-time and run by hand)"
+        type: string
+        default: "deploy jobs"
+  # There is no CI workflow in this repository yet, so a deploy cannot wait for a green CI. Until one exists the
+  # push trigger is the only automatic path: remove it (keep manual runs only) if deploying every merge is unwanted,
+  # and switch to `workflow_run` on [CI] once CI exists.
+  push:
+    branches: [main]
+
+# One deploy at a time; a newer request waits (never cancel a deploy half way through).
+concurrency:
+  group: deploy-docs0
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  id-token: write # mint the OIDC token Google exchanges for short-lived credentials
+
+env:
+  WORKLOAD_IDENTITY_PROVIDER: projects/870371939888/locations/global/workloadIdentityPools/github/providers/docs0-github
+  DEPLOY_SERVICE_ACCOUNT: github-actions-deployer@ai-agent-boilerplate0.iam.gserviceaccount.com
+  STEPS: ${{ github.event_name == 'workflow_dispatch' && inputs.steps || 'deploy jobs' }}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    environment: production # the secrets and variables below live in this GitHub environment
+    env:
+      # Secrets (environment secrets)
+      DOCS0_ANTHROPIC_API_KEY: ${{ secrets.DOCS0_ANTHROPIC_API_KEY }}
+      DOCS0_SLACK_BOT_TOKEN: ${{ secrets.DOCS0_SLACK_BOT_TOKEN }}
+      DOCS0_SLACK_SIGNING_SECRET: ${{ secrets.DOCS0_SLACK_SIGNING_SECRET }}
+      DOCS0_ENCRYPTION_KEY: ${{ secrets.DOCS0_ENCRYPTION_KEY }}
+      DOCS0_ADMIN_PASSWORD: ${{ secrets.DOCS0_ADMIN_PASSWORD }}
+      DOCS0_DATABASE_PASSWORD: ${{ secrets.DOCS0_DATABASE_PASSWORD }}
+      DOCS0_GOOGLE_OAUTH_CLIENT_ID: ${{ secrets.DOCS0_GOOGLE_OAUTH_CLIENT_ID }}
+      DOCS0_GOOGLE_OAUTH_CLIENT_SECRET: ${{ secrets.DOCS0_GOOGLE_OAUTH_CLIENT_SECRET }}
+      DOCS0_CRON_TOKEN: ${{ secrets.DOCS0_CRON_TOKEN }}
+      # Variables (environment variables; all optional, deploy.sh has defaults)
+      DOCS0_PUBLIC_URL: ${{ vars.DOCS0_PUBLIC_URL }}
+      DOCS0_TENANT_SLUG: ${{ vars.DOCS0_TENANT_SLUG }}
+      DOCS0_TENANT_NAME: ${{ vars.DOCS0_TENANT_NAME }}
+      DOCS0_MONTHLY_BUDGET_USD: ${{ vars.DOCS0_MONTHLY_BUDGET_USD }}
+      DOCS0_ANTHROPIC_MODEL: ${{ vars.DOCS0_ANTHROPIC_MODEL }}
+      DOCS0_SLACK_HISTORY_DAYS: ${{ vars.DOCS0_SLACK_HISTORY_DAYS }}
+      DOCS0_GRAIN_HISTORY_DAYS: ${{ vars.DOCS0_GRAIN_HISTORY_DAYS }}
+      DOCS0_GMAIL_HISTORY_DAYS: ${{ vars.DOCS0_GMAIL_HISTORY_DAYS }}
+      DOCS0_PROACTIVE_MAX_PER_HOUR: ${{ vars.DOCS0_PROACTIVE_MAX_PER_HOUR }}
+      DOCS0_STALE_DAYS: ${{ vars.DOCS0_STALE_DAYS }}
+      DOCS0_AGENT_MAX_STEPS: ${{ vars.DOCS0_AGENT_MAX_STEPS }}
+      DOCS0_NEW_TENANT_BUDGET_USD: ${{ vars.DOCS0_NEW_TENANT_BUDGET_USD }}
+      DOCS0_TIMEZONE: ${{ vars.DOCS0_TIMEZONE }}
+      DOCS0_DB_POOL_MAX: ${{ vars.DOCS0_DB_POOL_MAX }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.DEPLOY_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: What is being deployed
+        run: |
+          echo "commit: $(git rev-parse --short HEAD) - $(git log -1 --format=%s)"
+          echo "steps: $STEPS"
+          gcloud config list account project 2>&1 | sed 's/^/  /'
+          gcloud run services describe docs0 --region us-central1 --project ai-agent-boilerplate0 \
+            --format='value(status.latestReadyRevisionName)' 2>/dev/null | sed 's/^/current revision: /' || true
+
+      - name: Deploy (dry run)
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
+        run: |
+          args=(); for s in $STEPS; do args+=(--step "$s"); done
+          bash deploy/deploy.sh "${args[@]}"
+
+      - name: Deploy to Cloud Run
+        if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.dry_run) }}
+        run: |
+          args=(); for s in $STEPS; do args+=(--step "$s"); done
+          bash deploy/deploy.sh --apply "${args[@]}"
+
+      - name: Health check
+        if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.dry_run) }}
+        run: |
+          for i in 1 2 3 4 5 6; do
+            if curl -fsS -m 60 "https://docs0-870371939888.us-central1.run.app/health"; then echo; break; fi
+            echo "not healthy yet (attempt $i)"; sleep 10
+            if [ "$i" = 6 ]; then echo "health check failed"; exit 1; fi
+          done

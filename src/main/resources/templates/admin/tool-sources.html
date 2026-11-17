@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<head><meta charset="utf-8"><title>docs0 Linear, Trello and Grain sections</title></head>
+<body>
+<!-- One section of the Sources page for a tool that is connected with a pasted key: Linear, Trello or Grain. -->
+<th:block th:fragment="tool(p)">
+  <h2 th:id="${p.id}" th:text="${p.title}">Linear</h2>
+
+  <!-- Cannot store a secret yet -->
+  <div class="card pad" th:if="${p.state == 'setup'}" th:id="${p.id + '-setup'}">
+    <p><b th:text="${p.title + ' needs a one-time setup before it can be connected.'}">Setup</b></p>
+    <p>Add <code>DOCS0_ENCRYPTION_KEY</code> to the <code>.env</code> file and restart docs0. It is 32 random
+      bytes in base64; make one with <code>openssl rand -base64 32</code>. docs0 encrypts the key you paste
+      with it.</p>
+  </div>
+
+  <!-- Not connected -->
+  <div class="card pad" th:if="${p.state == 'disconnected'}" th:id="${p.id + '-not-connected'}">
+    <p><b th:text="${p.title + ' is not connected.'}">Linear is not connected.</b></p>
+    <th:block th:if="${p.id == 'linear'}">
+      <p>docs0 reads issues, projects and documents, and can file a new issue when someone asks (after they
+        confirm). It never edits or deletes anything in Linear.</p>
+      <ol>
+        <li>In Linear open <b>Settings → Account → Security &amp; access</b>.</li>
+        <li>Under <b>Personal API keys</b> create a key and copy it (it starts with <code>lin_api_</code>).</li>
+        <li>Paste it below. docs0 tests it, then stores it encrypted.</li>
+      </ol>
+      <form method="post" action="/admin/sources/linear/connect">
+        <input type="hidden" name="_csrf" th:value="${csrf}">
+        <p><input type="password" name="apiKey" placeholder="lin_api_…" autocomplete="off" required
+                  style="width:100%;font:inherit;padding:8px 10px;border-radius:8px;border:1px solid var(--line);background:var(--bg);color:var(--text)"></p>
+        <button class="primary" type="submit">Connect Linear</button>
+      </form>
+    </th:block>
+    <th:block th:if="${p.id == 'trello'}">
+      <p>docs0 reads boards and cards, and can add a new card when someone asks (after they confirm). It never
+        edits or deletes anything in Trello.</p>
+      <ol>
+        <li>Open <a href="https://trello.com/power-ups/admin" target="_blank" rel="noopener noreferrer">trello.com/power-ups/admin</a>
+          and choose <b>New</b> to make a Power-Up. Open its <b>API key</b> page and copy the key.</li>
+        <li>On that page choose to generate a <b>Token</b>, allow it, and copy it. It needs read and write
+          access, because docs0 adds cards when asked.</li>
+        <li>Paste both below. docs0 tests them, then stores them encrypted.</li>
+      </ol>
+      <form method="post" action="/admin/sources/trello/connect">
+        <input type="hidden" name="_csrf" th:value="${csrf}">
+        <p><input type="password" name="apiKey" placeholder="API key" autocomplete="off" required
+                  style="width:100%;font:inherit;padding:8px 10px;border-radius:8px;border:1px solid var(--line);background:var(--bg);color:var(--text)"></p>
+        <p><input type="password" name="token" placeholder="Token" autocomplete="off" required
+                  style="width:100%;font:inherit;padding:8px 10px;border-radius:8px;border:1px solid var(--line);background:var(--bg);color:var(--text)"></p>
+        <button class="primary" type="submit">Connect Trello</button>
+      </form>
+    </th:block>
+    <th:block th:if="${p.id == 'grain'}">
+      <p>docs0 reads meeting recordings: the AI summary, notes, highlights and transcript. It never edits or
+        deletes anything in Grain. Only the last <span th:text="${grainDays}">365</span> days are indexed.</p>
+      <ol>
+        <li>In Grain open <a href="https://grain.com/app/settings/integrations?tab=api" target="_blank" rel="noopener noreferrer">Settings → Integrations → Public API</a>.
+          A workspace admin can make a <b>workspace access token</b> there, which sees every recording of the
+          workspace. Otherwise make a <b>personal access token</b>, which sees only your own.</li>
+        <li>Copy the token.</li>
+        <li>Paste it below. docs0 tests it, then stores it encrypted.</li>
+      </ol>
+      <form method="post" action="/admin/sources/grain/connect">
+        <input type="hidden" name="_csrf" th:value="${csrf}">
+        <p><input type="password" name="token" placeholder="Access token" autocomplete="off" required
+                  style="width:100%;font:inherit;padding:8px 10px;border-radius:8px;border:1px solid var(--line);background:var(--bg);color:var(--text)"></p>
+        <button class="primary" type="submit">Connect Grain</button>
+      </form>
+    </th:block>
+  </div>
+
+  <!-- Connected -->
+  <th:block th:if="${p.state == 'connected'}">
+    <div class="card" th:id="${p.id + '-connected'}">
+      <div class="row">
+        <div class="detail">Connected to <b th:text="${p.account}">Workspace</b> ·
+          <span th:text="${p.documents}">0</span> documents indexed. The key is stored encrypted and is not shown.</div>
+        <div class="actions" th:if="${!p.confirmDisconnect}">
+          <a class="button danger" th:href="${'/admin/sources?confirm=' + p.id + '#' + p.id}">Disconnect</a>
+        </div>
+      </div>
+      <div class="row" th:if="${p.confirmDisconnect}" th:id="${p.id + '-confirm-disconnect'}">
+        <div class="detail"><b th:text="${'Disconnect ' + p.title + '?'}">Disconnect?</b> docs0 forgets the key and
+          stops using its items in answers. You can connect again later.</div>
+        <div class="actions">
+          <form method="post" th:action="${'/admin/sources/' + p.id + '/disconnect'}">
+            <input type="hidden" name="_csrf" th:value="${csrf}">
+            <button class="danger" type="submit">Yes, disconnect</button>
+          </form>
+          <a class="button" th:href="${'/admin/sources#' + p.id}">Cancel</a>
+        </div>
+      </div>
+    </div>
+
+    <div class="card msg error" th:if="${p.listError != null}" th:id="${p.id + '-error'}" th:text="${p.listError}">error</div>
+
+    <h3 style="padding-left:0;margin-top:16px" th:if="${p.id != 'grain'}" th:text="${p.id == 'linear' ? 'Teams to include' : 'Boards to include'}">Teams</h3>
+    <form method="post" th:action="${'/admin/sources/' + p.id + (p.id == 'linear' ? '/teams' : '/boards')}"
+          th:if="${p.id != 'grain' and p.choices != null}">
+      <input type="hidden" name="_csrf" th:value="${csrf}">
+      <div class="card" th:id="${p.id + '-choices'}">
+        <div class="empty" th:if="${p.choices.isEmpty()}" th:text="${p.id == 'linear' ? 'This workspace has no teams.' : 'This account has no open boards.'}">None</div>
+        <label class="row" th:each="c : ${p.choices}" style="cursor:pointer">
+          <input type="checkbox" name="choice" th:value="${c.id}" th:checked="${c.checked}">
+          <span class="name" th:text="${c.label}">Name</span>
+        </label>
+      </div>
+      <p style="margin-top:10px"><button class="primary" type="submit">Save</button></p>
+    </form>
+    <p class="sub" style="margin-top:8px" th:if="${p.id != 'grain'}">Nothing is indexed until you tick at least one.</p>
+
+    <h3 style="padding-left:0;margin-top:16px">Sync</h3>
+    <div class="card" th:id="${p.id + '-sync'}">
+      <div class="row">
+        <div class="detail" th:if="${p.syncRunning}"><b class="OFF">Sync running…</b> This page refreshes by itself.</div>
+        <div class="detail" th:if="${!p.syncRunning and p.id != 'grain'}">docs0 syncs by itself every few minutes. Check access
+          shows how much it can read now.</div>
+        <div class="detail" th:if="${!p.syncRunning and p.id == 'grain'}">docs0 syncs by itself every few minutes.
+          Check access counts the recordings from the last <span th:text="${grainDays}">365</span> days that it can read.</div>
+        <div class="actions" th:if="${!p.syncRunning}">
+          <form method="post" th:action="${'/admin/sources/' + p.id + '/check'}">
+            <input type="hidden" name="_csrf" th:value="${csrf}">
+            <button type="submit">Check access</button>
+          </form>
+          <form method="post" th:action="${'/admin/sources/' + p.id + '/sync'}">
+            <input type="hidden" name="_csrf" th:value="${csrf}">
+            <button class="primary" type="submit">Sync now</button>
+          </form>
+        </div>
+      </div>
+      <div class="row" th:each="r : ${p.runs}">
+        <div class="detail">
+          <span th:text="${r.started}">time</span>
+          · <span th:text="${r.run.counts.added}">0</span> added
+          · <span th:text="${r.run.counts.updated}">0</span> updated
+          · <span th:text="${r.run.counts.removed}">0</span> removed
+          · <span th:text="${r.run.counts.failed}">0</span> failed
+          <span th:if="${r.run.error != null}" class="DOWN" th:text="${' · ' + r.run.error}"></span>
+        </div>
+        <div class="state" th:classappend="${r.state}" th:text="${r.label}">Complete</div>
+      </div>
+      <div class="empty" th:if="${p.runs.isEmpty()}">No sync has run yet.</div>
+    </div>
+  </th:block>
+</th:block>
+</body>
+</html>
