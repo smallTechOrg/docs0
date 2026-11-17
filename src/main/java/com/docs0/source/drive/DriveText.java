@@ -17,6 +17,7 @@ public final class DriveText {
     public static final String GOOGLE_SHEET = "application/vnd.google-apps.spreadsheet";
     public static final String GOOGLE_SLIDES = "application/vnd.google-apps.presentation";
     public static final String PDF = "application/pdf";
+    public static final String HTML = "text/html";
 
     /** Files larger than this are skipped. */
     public static final long MAX_BYTES = 20L * 1024 * 1024;
@@ -30,13 +31,14 @@ public final class DriveText {
             GOOGLE_SHEET, "text/csv",
             GOOGLE_SLIDES, "text/plain");
 
-    private static final Set<String> PLAIN_TEXT = Set.of("text/plain", "text/markdown", "text/csv");
+    private static final Set<String> PLAIN_TEXT = Set.of("text/plain", "text/markdown", "text/csv", "text/vtt",
+            "application/json");
 
     private DriveText() {}
 
     public static boolean supported(String mimeType) {
         return mimeType != null && (EXPORTS.containsKey(mimeType) || PDF.equals(mimeType)
-                || PLAIN_TEXT.contains(mimeType) || OfficeText.supported(mimeType));
+                || PLAIN_TEXT.contains(mimeType) || HTML.equals(mimeType) || OfficeText.supported(mimeType));
     }
 
     /** True for a file docs0 indexes: a supported type that is not over the size limit. */
@@ -58,6 +60,13 @@ public final class DriveText {
             try (PDDocument pdf = Loader.loadPDF(content)) {
                 return new PDFTextStripper().getText(pdf);
             }
+        }
+        if (HTML.equals(mimeType)) {
+            return new String(content, StandardCharsets.UTF_8)
+                    .replaceAll("(?is)<(script|style)[^>]*>.*?</\\1>", " ")
+                    .replaceAll("(?s)<[^>]+>", " ")
+                    .replace("&nbsp;", " ").replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">")
+                    .replaceAll("[ \\t]+", " ").replaceAll("\\s*\\n\\s*", "\n").strip();
         }
         if (OfficeText.supported(mimeType)) {
             return OfficeText.extract(mimeType, content);

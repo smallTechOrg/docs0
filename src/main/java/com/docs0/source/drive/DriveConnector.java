@@ -99,12 +99,15 @@ public class DriveConnector implements SourceConnector, StatusContributor {
         int updated = 0;
         int skipped = 0;
         int failed = 0;
+        Map<String, Integer> skippedByType = new java.util.TreeMap<>();
         for (DriveFile file : files) {
             if (DriveText.FOLDER.equals(file.mimeType())) {
                 continue;
             }
             if (!DriveText.indexable(file.mimeType(), file.size())) {
                 skipped++;
+                skippedByType.merge(DriveText.supported(file.mimeType()) ? file.mimeType() + " (too large)"
+                        : String.valueOf(file.mimeType()), 1, Integer::sum);
                 continue;
             }
             if (!indexable.add(file.id())) {
@@ -131,6 +134,10 @@ public class DriveConnector implements SourceConnector, StatusContributor {
                 failed++;
                 log.warn("Drive file {} ({}) could not be indexed: {}", file.id(), file.mimeType(), e.toString());
             }
+        }
+
+        if (!skippedByType.isEmpty()) {
+            log.info("Drive sync skipped {} files, by type: {}", skipped, skippedByType);
         }
 
         // Stored documents that are no longer inside a chosen folder, or can no longer be indexed,

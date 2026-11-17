@@ -138,4 +138,16 @@ class DriveTextTest {
         }
         return bytes.toByteArray();
     }
+
+    @Test
+    void htmlLosesItsTagsScriptsAndStyles() throws IOException {
+        String html = "<html><style>p{color:red}</style><body><h1>Pricing</h1><p>Plans &amp; terms</p>"
+                + "<script>var x=1;</script></body></html>";
+
+        String text = DriveText.extract(DriveText.HTML, html.getBytes(StandardCharsets.UTF_8));
+
+        assertThat(text).contains("Pricing").contains("Plans & terms").doesNotContain("color").doesNotContain("var x");
+        assertThat(DriveText.supported("text/vtt")).isTrue();
+        assertThat(DriveText.supported("application/json")).isTrue();
+    }
 }
