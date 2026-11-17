@@ -52,7 +52,7 @@ class AdminIsolationTest extends Phase6IntegrationTest {
         for (Side side : List.of(a, b)) {
             var unknown = new Agent.AgentResult(Agent.Kind.UNKNOWN, "No idea.", Agent.Confidence.LOW, List.of(),
                     List.of(), List.of(), 1, 10, 1, BigDecimal.ZERO, 5, null);
-            long conversation = conversations.findOrCreate(side.tenantId(), "C2", "999.1", false).id();
+            long conversation = conversations.findOrCreate(side.tenantId(), "C2", "999.1", false, false).id();
             interactions.insert(side.tenantId(), conversation, "U1", side.marker() + " only question about parking?",
                     unknown, "999.2");
         }

@@ -46,6 +46,10 @@ class AudienceFromSlackTest {
     void setUp() {
         tenantId = TestDatabase.resetWithTenant();
         identities = new IdentityService(jdbc, slack);
+        handler = newHandler();
+    }
+
+    private QuestionHandler newHandler() {
         Docs0Properties props = new Docs0Properties(new Docs0Properties.Tenant("smalltech", "smallTech"),
                 new Docs0Properties.Anthropic("", "test-model", new BigDecimal("2"), new BigDecimal("10"), 12),
                 new Docs0Properties.Budget(new BigDecimal("100")), new Docs0Properties.Slack("", ""),
@@ -55,15 +59,20 @@ class AudienceFromSlackTest {
                 new InteractionRepository(jdbc), new com.docs0.feedback.FeedbackRepository(jdbc),
                 new com.docs0.feedback.CorrectionRepository(jdbc), slack, new TenantService(jdbc),
                 new BudgetService(jdbc, props));
-        handler = new QuestionHandler(new TenantService(jdbc), agent, new FakeKnowledge(),
+        return new QuestionHandler(new TenantService(jdbc), agent, new FakeKnowledge(),
                 new BudgetService(jdbc, props), new ConversationRepository(jdbc), new InteractionRepository(jdbc), slack,
                 flow, new com.docs0.action.PendingActionRepository(jdbc), identities, Duration.ZERO);
     }
 
     private void ask(String channel, String user) throws Exception {
+        ask(channel, user, null);
+    }
+
+    /** With a thread ts, every question lands in the same conversation. */
+    private void ask(String channel, String user, String threadTs) throws Exception {
         CompletableFuture<Void> work = handler.handle(tenantId, IncomingEvent.of(
                 channel.startsWith("D") ? IncomingEvent.Kind.DIRECT_MESSAGE : IncomingEvent.Kind.MENTION,
-                channel, user, "<@UBOT> what is the plan?", "100." + System.nanoTime() % 100000, null,
+                channel, user, "<@UBOT> what is the plan?", "100." + System.nanoTime() % 100000, threadTs,
                 "Ev" + System.nanoTime()));
         work.get(10, TimeUnit.SECONDS);
     }
@@ -265,5 +274,45 @@ class AudienceFromSlackTest {
         assertThat(identities.displayName(tenantId, "U1")).isEqualTo("Name U1");
         slack.userInfoFails = true;
         assertThat(identities.displayName(tenantId, "U404")).isEqualTo("U404");
+    }
+
+    private Boolean channelPrivate(String channel) {
+        return jdbc.sql("SELECT channel_private FROM conversation WHERE tenant_id = :t AND channel_id = :c")
+                .param("t", tenantId).param("c", channel).query((rs, n) -> rs.getObject(1, Boolean.class)).list().get(0);
+    }
+
+    @Test
+    void theConversationRecordsWhetherItsChannelIsPrivateWithoutAnExtraSlackCall() throws Exception {
+        slack.members = Set.of("U1", "U2", "UBOT");
+        slack.publicChannels.add("C_PUB");
+
+        ask("C_PUB", "U1");
+        ask("C_PRIV", "U1");
+        ask("D100", "U1");
+
+        assertThat(channelPrivate("C_PUB")).isFalse();
+        assertThat(channelPrivate("C_PRIV")).isTrue();
+        assertThat(channelPrivate("D100")).isTrue();
+        // One lookup per channel: the audience reuses the cached answer. The DM needs none.
+        assertThat(slack.privacyLookups.get()).isEqualTo(2);
+    }
+
+    @Test
+    void anUnknownPrivacyIsStoredAsNullAndFilledInLaterButNeverOverwrittenWithNull() throws Exception {
+        slack.members = Set.of("U1", "U2", "UBOT");
+        slack.publicChannels.add(CHANNEL);
+        slack.privacyLookupFails = true;
+        ask(CHANNEL, "U1", "50.1");
+        assertThat(channelPrivate(CHANNEL)).isNull();
+
+        slack.privacyLookupFails = false;
+        ask(CHANNEL, "U1", "50.1");
+        assertThat(channelPrivate(CHANNEL)).isFalse();
+
+        // Slack failing again (here: a fresh handler without the cache) must not erase what is known.
+        handler = newHandler();
+        slack.privacyLookupFails = true;
+        ask(CHANNEL, "U1", "50.1");
+        assertThat(channelPrivate(CHANNEL)).isFalse();
     }
 }

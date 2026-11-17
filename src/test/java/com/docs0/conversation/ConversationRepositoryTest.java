@@ -165,4 +165,28 @@ class ConversationRepositoryTest {
                 .containsEntry("answer_ts", "100.3").containsEntry("input_tokens", 0L);
         assertThat((BigDecimal) refused.get("cost_usd")).isEqualByComparingTo("0");
     }
+
+    private Boolean channelPrivate(Conversation c) {
+        return jdbc.sql("SELECT channel_private FROM conversation WHERE id = :id").param("id", c.id())
+                .query((rs, n) -> rs.getObject(1, Boolean.class)).list().get(0);
+    }
+
+    @Test
+    void channelPrivacyIsRecordedFilledInLaterAndNeverBlankedOrFlipped() {
+        Conversation unknown = conversations.findOrCreate(tenantId, "C1", "1.1", false, null);
+        assertThat(channelPrivate(unknown)).isNull();
+
+        conversations.findOrCreate(tenantId, "C1", "1.1", false, false);
+        assertThat(channelPrivate(unknown)).isFalse();
+
+        conversations.findOrCreate(tenantId, "C1", "1.1", false, null);
+        assertThat(channelPrivate(unknown)).isFalse();
+
+        Conversation priv = conversations.findOrCreate(tenantId, "C2", "1.1", false, true);
+        conversations.findOrCreate(tenantId, "C2", "1.1", false, null);
+        assertThat(channelPrivate(priv)).isTrue();
+        // The four-argument form: a DM is private, a channel is unknown.
+        assertThat(channelPrivate(conversations.findOrCreate(tenantId, "D1", "", true))).isTrue();
+        assertThat(channelPrivate(conversations.findOrCreate(tenantId, "C3", "1.1", false))).isNull();
+    }
 }

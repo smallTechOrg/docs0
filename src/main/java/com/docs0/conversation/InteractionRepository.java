@@ -144,7 +144,7 @@ public class InteractionRepository {
                         FROM interaction i
                         JOIN conversation c ON c.id = i.conversation_id AND c.tenant_id = i.tenant_id,
                              (SELECT replace(websearch_to_tsquery('english', :question)::text, ' & ', ' | ')::tsquery AS q) m
-                        WHERE i.tenant_id = :tenantId AND NOT c.is_dm
+                        WHERE i.tenant_id = :tenantId AND NOT c.is_dm AND c.channel_private = FALSE
                           AND i.kind = 'ANSWER' AND i.confidence IN ('MEDIUM', 'HIGH') AND NOT i.used_restricted
                           AND i.question_search @@ m.q
                           AND NOT (c.channel_id = :channel AND c.thread_ts = :threadTs)

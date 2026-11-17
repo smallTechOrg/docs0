@@ -500,7 +500,7 @@ class DataIsolationTest extends Phase6IntegrationTest {
     }
 
     private void addQuestion(Side side, String question) {
-        Conversation c = conversations.findOrCreate(side.tenantId(), "C2", "700." + question.length(), false);
+        Conversation c = conversations.findOrCreate(side.tenantId(), "C2", "700." + question.length(), false, false);
         var unknown = new Agent.AgentResult(Agent.Kind.UNKNOWN, "I could not find that.", Agent.Confidence.LOW,
                 List.of(), List.of(), List.of(), 1, 10, 1, BigDecimal.ZERO, 5, null);
         interactions.insert(side.tenantId(), c.id(), USER, question, unknown, "800." + question.length());

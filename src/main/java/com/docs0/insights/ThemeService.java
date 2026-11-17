@@ -29,7 +29,7 @@ import tools.jackson.databind.json.JsonMapper;
 /**
  * The top question themes of a period, from ONE batched model call over the period's questions. The result is
  * kept for a few hours so opening the page costs nothing; an admin can recompute it, at most once in a while.
- * DM questions and questions whose answer used a private source are never sent to the model: they are only counted
+ * DM questions, questions asked in private channels (or in a channel whose privacy is unknown) and questions whose answer used a private source are never sent to the model: they are only counted
  * ({@code askedPrivately}, {@code usedPrivateSources}), so no theme, label or example can be derived from them.
  */
 @Service
@@ -157,14 +157,15 @@ public class ThemeService {
         Map<String, int[]> counts = new LinkedHashMap<>();
         Map<String, Q> byKey = new LinkedHashMap<>();
         var rows = jdbc.sql("""
-                        SELECT i.id, i.question, c.is_dm
+                        SELECT i.id, i.question, c.is_dm, c.channel_private
                         FROM interaction i JOIN conversation c ON c.id = i.conversation_id AND c.tenant_id = i.tenant_id
                         WHERE i.tenant_id = :t AND i.created_at >= :from AND i.kind IN ('ANSWER', 'CLARIFY', 'UNKNOWN')
                         ORDER BY i.created_at DESC, i.id DESC
                         LIMIT 3000
                         """)
                 .param("t", tenantId).param("from", java.sql.Timestamp.from(since))
-                .query((rs, n) -> new Object[] {rs.getLong("id"), rs.getString("question"), rs.getBoolean("is_dm")})
+                .query((rs, n) -> new Object[] {rs.getLong("id"), rs.getString("question"), rs.getBoolean("is_dm"),
+                        rs.getObject("channel_private", Boolean.class)})
                 .list();
         Set<Long> privateAnswers = interactions.usedRestricted(tenantId, rows.stream().map(r -> (Long) r[0]).toList());
         long askedPrivately = 0;
@@ -172,7 +173,8 @@ public class ThemeService {
         for (Object[] r : rows) {
             long id = (Long) r[0];
             boolean dm = (Boolean) r[2];
-            if (dm) {
+            // Only a conversation known to be in a public channel may reach the model; unknown counts as private.
+            if (dm || !Boolean.FALSE.equals(r[3])) {
                 askedPrivately++;
                 continue;
             }

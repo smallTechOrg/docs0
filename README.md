@@ -402,8 +402,8 @@ it says so, asks a clarifying question, or names who might know.
   (questions with no answer, low confidence or a 👎, with how often a similar one came up), the old
   documents people rely on, and how repeat answers were received. For each old document, **Ask the
   owner to review** sends the owner (found in Slack by email) a short direct message, at most once
-  per document in 14 days; docs0 never does this by itself. Direct-message questions are only counted,
-  never shown or quoted, and a question whose answer used a private source (a private channel, a
+  per document in 14 days; docs0 never does this by itself. Direct-message and private-channel questions (and any whose channel privacy is unknown) are only counted,
+  never shown, quoted or sent to the themes model, and a question whose answer used a private source (a private channel, a
   mailbox) is shown as "Question not shown (private source)".
 - **Weekly digest.** On the Insights page choose a channel (and invite `@docs0` to it); docs0 then posts
   a short summary of the last 7 days there on `DOCS0_DIGEST_CRON`, once a week, and **Post digest now**

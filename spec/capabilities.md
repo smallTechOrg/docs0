@@ -256,7 +256,7 @@ token endpoint is forced to Google's whatever a stored key says; key fields over
 In opted-in channels docs0 offers an answer when it recognises a repeat question. It
 flags answers that rely on a stale document and lets an admin nudge the owner. Insights
 (a dashboard page and an optional weekly digest) report top themes, knowledge gaps and the
-stale documents people rely on; DM questions are counted without attribution.
+stale documents people rely on; DM questions and questions from private or unknown-privacy channels (`conversation.channel_private` is not `false`) are only counted: never sent to the themes model, quoted or reflected in a label.
 
 **Repeat-question answers.**
 

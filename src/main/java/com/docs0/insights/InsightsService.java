@@ -51,7 +51,7 @@ public class InsightsService {
      */
     public record Gap(String question, boolean redacted, long times, Instant latest, String reason, String channelId) {}
 
-    /** The gaps, newest first, and how many gap questions were asked privately (in DMs) and are only counted. */
+    /** The gaps, newest first, and how many gap questions were asked privately (DMs, private or unknown channels) and are only counted. */
     public record Gaps(List<Gap> items, long privateCount) {}
 
     private final JdbcClient jdbc;
@@ -100,17 +100,17 @@ public class InsightsService {
                 .param("t", tenantId).param("from", from).param("r", rating).query(Long.class).single();
     }
 
-    private record GapRow(long id, String question, String kind, String confidence, boolean dm, boolean down,
+    private record GapRow(long id, String question, String kind, String confidence, boolean dm, boolean publicChannel, boolean down,
             String channelId, Instant createdAt) {}
 
     /**
      * Questions in the period that got no answer, a low-confidence answer or a 👎, newest first. Similar
-     * questions (same words, ignoring case and punctuation) are grouped. DM questions are only counted, and
+     * questions (same words, ignoring case and punctuation) are grouped. DM, private-channel and unknown-channel questions are only counted, and
      * a question whose answer used a private source is listed without its text.
      */
     public Gaps gaps(long tenantId, Instant since) {
         List<GapRow> rows = jdbc.sql("""
-                        SELECT i.id, i.question, i.kind, i.confidence, c.is_dm, c.channel_id, i.created_at,
+                        SELECT i.id, i.question, i.kind, i.confidence, c.is_dm, c.channel_private, c.channel_id, i.created_at,
                                EXISTS (SELECT 1 FROM feedback f WHERE f.tenant_id = i.tenant_id
                                        AND f.interaction_id = i.id AND f.rating = 'DOWN') AS down
                         FROM interaction i JOIN conversation c ON c.id = i.conversation_id AND c.tenant_id = i.tenant_id
@@ -123,7 +123,8 @@ public class InsightsService {
                         """)
                 .param("t", tenantId).param("from", java.sql.Timestamp.from(since)).param("limit", GAP_ROWS)
                 .query((rs, n) -> new GapRow(rs.getLong("id"), rs.getString("question"), rs.getString("kind"),
-                        rs.getString("confidence"), rs.getBoolean("is_dm"), rs.getBoolean("down"),
+                        rs.getString("confidence"), rs.getBoolean("is_dm"),
+                        Boolean.FALSE.equals(rs.getObject("channel_private", Boolean.class)), rs.getBoolean("down"),
                         rs.getString("channel_id"), rs.getTimestamp("created_at").toInstant()))
                 .list();
         Set<Long> privateAnswers = interactions.usedRestricted(tenantId, rows.stream().map(GapRow::id).toList());
@@ -132,7 +133,7 @@ public class InsightsService {
         List<Gap> items = new ArrayList<>();
         Map<String, Integer> groupIndex = new LinkedHashMap<>();
         for (GapRow row : rows) {
-            if (row.dm()) {
+            if (row.dm() || !row.publicChannel()) {
                 privateCount++;
             } else if (privateAnswers.contains(row.id())) {
                 items.add(new Gap(null, true, 1, row.createdAt(), reason(row), row.channelId()));

@@ -43,7 +43,7 @@
       <p><b th:text="${t.label}">Pricing</b> <span class="badge" th:text="${'about ' + t.count}">about 4</span></p>
       <p class="sub" th:if="${t.example != null}">For example: <span th:text="${t.example}">example</span></p>
     </div>
-    <p class="sub pad" th:if="${themesAskedPrivately > 0 or themesUsedPrivate > 0}"><span th:text="${themesAskedPrivately}">0</span> questions asked privately and <span th:text="${themesUsedPrivate}">0</span> that used private sources are counted only; they are not part of the themes.</p>
+    <p class="sub pad" th:if="${themesAskedPrivately > 0 or themesUsedPrivate > 0}"><span th:text="${themesAskedPrivately}">0</span> questions asked privately or in private channels and <span th:text="${themesUsedPrivate}">0</span> that used private sources are counted only; they are not part of the themes.</p>
     <div class="pad" th:if="${themeStatus == 'OK' or themeStatus == 'FAILED'}">
       <form method="post" action="/admin/insights/refresh" class="actions">
         <input type="hidden" name="_csrf" th:value="${csrf}">
@@ -66,7 +66,7 @@
     </div>
     <div class="item" th:if="${gapsMore > 0}"><p class="sub">And <span th:text="${gapsMore}">3</span> more.</p></div>
     <div class="item" th:if="${privateCount > 0}">
-      <p class="sub"><span th:text="${privateCount}">3</span> <span th:text="${privateCount == 1 ? 'question' : 'questions'}">questions</span> asked privately</p>
+      <p class="sub"><span th:text="${privateCount}">3</span> <span th:text="${privateCount == 1 ? 'question' : 'questions'}">questions</span> asked privately or in private channels</p>
     </div>
   </div>
 

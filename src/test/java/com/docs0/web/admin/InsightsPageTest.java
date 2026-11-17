@@ -66,8 +66,8 @@ class InsightsPageTest extends com.docs0.Phase6IntegrationTest {
         slack.reset();
         llm.reset();
         slack.channel("C1", "general", false, true).channel("C9", "leads", true, true);
-        channel = TestData.conversation(jdbc, tenant.id(), "C1", "1.1", false);
-        privateChannel = TestData.conversation(jdbc, tenant.id(), "C9", "1.1", false);
+        channel = TestData.conversation(jdbc, tenant.id(), "C1", "1.1", false, false);
+        privateChannel = TestData.conversation(jdbc, tenant.id(), "C9", "1.1", false, true);
         dm = TestData.conversation(jdbc, tenant.id(), "D1", "", true);
     }
 
@@ -245,8 +245,31 @@ class InsightsPageTest extends com.docs0.Phase6IntegrationTest {
         assertThat(prompt).doesNotContain("Birgit").doesNotContain("Birchwood").doesNotContain("salary")
                 .doesNotContain("bonus");
         assertThat(html).doesNotContain("Birgit").doesNotContain("Birchwood").contains("How do refunds work?");
-        assertThat(html).contains("1</span> questions asked privately and <span>1</span> that used private sources");
+        assertThat(html).contains("1</span> questions asked privately or in private channels and <span>1</span> that used private sources");
         assertThat(secretDoc).isPositive();
+    }
+
+    @Test
+    void privateChannelAndUnknownChannelQuestionsAreCountedAndNeverSentToTheModelOrShown() throws Exception {
+        Conversation unknownChannel = TestData.conversation(jdbc, tenant.id(), "C7", "1.1", false);
+        answered(channel, "How do refunds work?");
+        answered(privateChannel, "What is the leads bonus pool?");
+        answered(unknownChannel, "Who is leaving the Zebra team?");
+        log(privateChannel, "Private gap about Quokka", Kind.UNKNOWN, Confidence.LOW);
+        log(unknownChannel, "Unknown gap about Wombat", Kind.UNKNOWN, Confidence.LOW);
+        log(channel, "Public gap about Heron", Kind.UNKNOWN, Confidence.LOW);
+        llm.themes = List.of(FakeThemesLlmConfig.ThemesLlm.theme("Refunds", 1, 0),
+                FakeThemesLlmConfig.ThemesLlm.theme("Leads", 1, 1), FakeThemesLlmConfig.ThemesLlm.theme("Team", 1, 2));
+
+        String html = page("");
+
+        String prompt = llm.asked.get(0);
+        assertThat(prompt).contains("How do refunds work?").contains("Public gap about Heron");
+        assertThat(prompt).doesNotContain("bonus").doesNotContain("Zebra").doesNotContain("Quokka")
+                .doesNotContain("Wombat");
+        assertThat(html).contains("Public gap about Heron").doesNotContain("Quokka").doesNotContain("Wombat")
+                .doesNotContain("Zebra").doesNotContain("bonus pool");
+        assertThat(html).contains("4</span> questions asked privately or in private channels");
     }
 
     @Test
@@ -333,7 +356,7 @@ class InsightsPageTest extends com.docs0.Phase6IntegrationTest {
 
         String t = text(page(""));
 
-        assertThat(t).contains("asked 3 times").doesNotContain("asked 2 times");
+        assertThat(t).contains("asked 2 times").doesNotContain("asked 3 times");
         assertThat(t.split("Where is the gym").length - 1).isEqualTo(1);
         assertThat(t.split("(?i)where is the lunch menu").length - 1).isEqualTo(1);
     }

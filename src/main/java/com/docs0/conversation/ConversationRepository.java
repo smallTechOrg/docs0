@@ -24,17 +24,28 @@ public class ConversationRepository {
      * Pass the empty string as {@code threadTs} for a DM written outside a thread.
      */
     public Conversation findOrCreate(long tenantId, String channelId, String threadTs, boolean dm) {
+        return findOrCreate(tenantId, channelId, threadTs, dm, dm ? Boolean.TRUE : null);
+    }
+
+    /**
+     * As above, recording whether the channel is private: TRUE (a DM is always TRUE), FALSE, or null when unknown.
+     * A known value is never replaced by null; an unknown one is filled in once the privacy is known.
+     */
+    public Conversation findOrCreate(long tenantId, String channelId, String threadTs, boolean dm,
+            Boolean channelPrivate) {
         return jdbc.sql("""
-                        INSERT INTO conversation (tenant_id, channel_id, thread_ts, is_dm)
-                        VALUES (:tenantId, :channelId, :threadTs, :dm)
+                        INSERT INTO conversation (tenant_id, channel_id, thread_ts, is_dm, channel_private)
+                        VALUES (:tenantId, :channelId, :threadTs, :dm, :channelPrivate)
                         ON CONFLICT (tenant_id, channel_id, thread_ts)
-                        DO UPDATE SET is_dm = conversation.is_dm
+                        DO UPDATE SET is_dm = conversation.is_dm,
+                                      channel_private = coalesce(conversation.channel_private, EXCLUDED.channel_private)
                         RETURNING id, tenant_id, channel_id, thread_ts, is_dm
                         """)
                 .param("tenantId", tenantId)
                 .param("channelId", channelId)
                 .param("threadTs", threadTs == null ? "" : threadTs)
                 .param("dm", dm)
+                .param("channelPrivate", channelPrivate, java.sql.Types.BOOLEAN)
                 .query((rs, n) -> new Conversation(rs.getLong("id"), rs.getLong("tenant_id"),
                         rs.getString("channel_id"), rs.getString("thread_ts"), rs.getBoolean("is_dm")))
                 .single();

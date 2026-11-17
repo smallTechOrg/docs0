@@ -21,6 +21,12 @@ public final class TestData {
         return new ConversationRepository(jdbc).findOrCreate(tenantId, channel, threadTs, dm);
     }
 
+    /** A conversation whose channel privacy is known: TRUE private, FALSE public (null unknown). */
+    public static Conversation conversation(JdbcClient jdbc, long tenantId, String channel, String threadTs,
+            boolean dm, Boolean channelPrivate) {
+        return new ConversationRepository(jdbc).findOrCreate(tenantId, channel, threadTs, dm, channelPrivate);
+    }
+
     /** One logged answer with the given Slack reply ts and cost; returns the interaction id. */
     public static long interaction(JdbcClient jdbc, Conversation conversation, String user, String question,
             String answer, String answerTs, String cost) {

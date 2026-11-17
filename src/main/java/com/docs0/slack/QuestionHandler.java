@@ -560,7 +560,14 @@ public class QuestionHandler {
     }
 
     private Conversation conversation(long tenantId, Question q) {
-        return conversations.findOrCreate(tenantId, q.channel(), q.conversationThreadTs(), q.dm());
+        Boolean channelPrivate = q.dm() ? Boolean.TRUE : knownPrivacy(tenantId, q.channel());
+        return conversations.findOrCreate(tenantId, q.channel(), q.conversationThreadTs(), q.dm(), channelPrivate);
+    }
+
+    /** TRUE for a private channel, FALSE for a public one, null when Slack cannot say. Uses the privacy cache. */
+    private Boolean knownPrivacy(long tenantId, String channel) {
+        SlackMessenger.ChannelPrivacy value = lookupPrivacy(tenantId, channel);
+        return value == null ? null : value == SlackMessenger.ChannelPrivacy.PRIVATE;
     }
 
     /**
@@ -600,26 +607,31 @@ public class QuestionHandler {
 
     /** True only when Slack says the channel is private. A public channel, or any failure, is not private. */
     private boolean isPrivateChannel(long tenantId, String channel) {
+        return lookupPrivacy(tenantId, channel) == SlackMessenger.ChannelPrivacy.PRIVATE;
+    }
+
+    /** The channel's privacy from the cache or Slack; null when Slack cannot say (failures are not cached). */
+    private SlackMessenger.ChannelPrivacy lookupPrivacy(long tenantId, String channel) {
         String key = key(tenantId, channel);
         long now = System.nanoTime();
         CachedPrivacy cached = privacy.get(key);
         if (cached != null && now - cached.expiresAtNanos() < 0) {
-            return cached.value() == SlackMessenger.ChannelPrivacy.PRIVATE;
+            return cached.value();
         }
         try {
             SlackMessenger.ChannelPrivacy value = messenger(tenantId).channelPrivacy(channel);
             if (value == null) {
-                return false;
+                return null;
             }
             if (privacy.size() >= PRIVACY_CAPACITY) {
                 privacy.clear();
             }
             privacy.put(key, new CachedPrivacy(value, now + PRIVACY_TTL_NANOS));
-            return value == SlackMessenger.ChannelPrivacy.PRIVATE;
+            return value;
         } catch (Exception e) {
             log.warn("Channel privacy lookup failed, answering from shared knowledge only: channel={} error={}",
                     channel, reason(e));
-            return false;
+            return null;
         }
     }
 

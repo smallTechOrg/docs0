@@ -125,7 +125,7 @@ public final class TwoTenants {
                 marker + " workspace", botToken, "UBOT" + marker, "admin", "chat:write");
 
         // A conversation with the same channel and thread, an answered question that cited the document.
-        Conversation conversation = new ConversationRepository(jdbc).findOrCreate(t, CHANNEL, THREAD, false);
+        Conversation conversation = new ConversationRepository(jdbc).findOrCreate(t, CHANNEL, THREAD, false, false);
         AgentResult result = new AgentResult(Kind.ANSWER, "Refunds take " + refundDays + " days. " + marker,
                 Confidence.HIGH, List.of(new Citation(1, document, "Refund policy", "https://docs.example.com/" + marker,
                 "customers get a refund")), List.of(), List.of(), 2, 1000, 100, new BigDecimal(questionCost), 10, null);

@@ -187,7 +187,7 @@ public class DigestService {
             long privately = themeResult.askedPrivately() + themeResult.usedPrivateSources();
             if (privately > 0) {
                 t.append("\n_").append(privately).append(privately == 1 ? " question" : " questions")
-                        .append(" asked privately or using private sources ").append(privately == 1 ? "is" : "are")
+                        .append(" asked privately, in private channels or using private sources ").append(privately == 1 ? "is" : "are")
                         .append(" not part of the themes._");
             }
             blocks.add(section(s -> s.text(markdownText(t.toString()))));
@@ -234,7 +234,7 @@ public class DigestService {
         }
         blocks.add(section(s -> s.text(markdownText(d.toString()))));
         blocks.add(divider());
-        blocks.add(context(List.of(markdownText("Questions asked in direct messages are counted, never shown."))));
+        blocks.add(context(List.of(markdownText("Questions asked in direct messages or private channels are counted, never shown."))));
         return blocks;
     }
 

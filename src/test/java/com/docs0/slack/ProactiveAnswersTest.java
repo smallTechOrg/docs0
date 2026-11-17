@@ -125,7 +125,7 @@ class ProactiveAnswersTest {
 
     private long pastAnswer(String channel, String threadTs, String question, String kind, String confidence) {
         boolean dm = channel.startsWith("D");
-        Conversation c = new ConversationRepository(jdbc).findOrCreate(tenantId, channel, dm ? "" : threadTs, dm);
+        Conversation c = new ConversationRepository(jdbc).findOrCreate(tenantId, channel, dm ? "" : threadTs, dm, dm ? Boolean.TRUE : Boolean.FALSE);
         AgentResult result = new AgentResult(Kind.valueOf(kind), "An answer.", Confidence.valueOf(confidence),
                 List.of(), List.of(), List.of(), 1, 100, 10, new BigDecimal("0.01"), 5, null);
         return interactions.insert(tenantId, c.id(), "U9", question, result, "60." + System.nanoTime() % 1000000);
@@ -620,7 +620,7 @@ class ProactiveAnswersTest {
     void candidatesBelongToTheTenantOnly() {
         long other = jdbc.sql("INSERT INTO tenant (slug, name) VALUES ('other', 'Other') RETURNING id")
                 .query(Long.class).single();
-        Conversation c = new ConversationRepository(jdbc).findOrCreate(other, "C500", "1.1", false);
+        Conversation c = new ConversationRepository(jdbc).findOrCreate(other, "C500", "1.1", false, false);
         interactions.insert(other, c.id(), "U9", "How do I reset my VPN password?",
                 new AgentResult(Kind.ANSWER, "a", Confidence.HIGH, List.of(), List.of(), List.of(), 1, 1, 1,
                         BigDecimal.ZERO, 1, null), "1.2");
