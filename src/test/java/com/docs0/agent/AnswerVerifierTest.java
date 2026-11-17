@@ -95,6 +95,32 @@ class AnswerVerifierTest {
     }
 
     @Test
+    void aBracketedNumberThatCannotBeACitationOrIsALinkTextStaysAsWritten() {
+        Verified v = verify(Kind.ANSWER,
+                "In [2024] the Team plan costs $12 [1]. See [1](https://docs.example/1) and [3] too.", Confidence.HIGH,
+                cite(1, "The Team plan costs $12 per seat per month"),
+                cite(2, "Refunds are available within 30 days of purchase"));
+
+        // [2024] and [3] are beyond the 2 submitted citations; [1](...) is a markdown link, not a marker.
+        assertThat(v.answer()).isEqualTo(
+                "In [2024] the Team plan costs $12 [1]. See [1](https://docs.example/1) and [3] too.");
+        assertThat(v.citations()).extracting(Citation::index).containsExactly(1, 2);
+    }
+
+    @Test
+    void twoCitationsOfTheSameDocumentAndQuoteAreOneCitation() {
+        Verified v = verify(Kind.ANSWER, "Team is $12 [1]. Again $12 [2]. Refunds take 30 days [3].", Confidence.HIGH,
+                cite(1, "The Team plan costs $12 per seat per month"),
+                cite(1, "the team plan costs $12 per  seat per month"),
+                cite(2, "Refunds are available within 30 days of purchase"));
+
+        assertThat(v.answer()).isEqualTo("Team is $12 [1]. Again $12 [1]. Refunds take 30 days [2].");
+        assertThat(v.citations()).extracting(Citation::documentId).containsExactly(1L, 2L);
+        assertThat(v.citations()).extracting(Citation::index).containsExactly(1, 2);
+        assertThat(v.droppedCitations()).isZero();
+    }
+
+    @Test
     void removesDroppedMarkersWithoutLeavingGapsOrBrackets() {
         Verified v = verify(Kind.ANSWER,
                 "[1] First claim [1][2]. Second [1, 2] here [2] and [9] there.\n[1] Line two [2] .",
@@ -102,7 +128,8 @@ class AnswerVerifierTest {
                 cite(99, "this document does not exist at all"),
                 cite(2, "Refunds are available within 30 days of purchase"));
 
-        assertThat(v.answer()).isEqualTo("First claim [1]. Second [1] here [1] and there.\nLine two [1] .");
+        // [9] is not a citation marker (only 2 were submitted): it stays as written.
+        assertThat(v.answer()).isEqualTo("First claim [1]. Second [1] here [1] and [9] there.\nLine two [1] .");
         assertThat(v.answer()).doesNotContain("  ").doesNotContain("[]").doesNotContain("[,");
     }
 

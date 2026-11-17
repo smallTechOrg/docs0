@@ -135,6 +135,50 @@ class PrivateAnswersAdminTest extends IntegrationTest {
                 .query(Boolean.class).single();
     }
 
+    // ---- a restricted document that was read but not cited -----------------------------------
+
+    /** An answer the model built after the tools returned a restricted document, whatever it cited. */
+    private long answerAfterReadingRestricted(Conversation conversation, String question, String text, String cost,
+            Kind kind, Confidence confidence, List<Citation> citations) {
+        AgentResult result = new AgentResult(kind, text, confidence, citations, List.of(), List.of(), 2, 1000, 100,
+                new BigDecimal(cost), 10, null, List.of(), List.of(), true);
+        return interactions.insert(tenant.id(), conversation.id(), "U1", question, result, "9." + System.nanoTime() % 100000);
+    }
+
+    @Test
+    void anAnswerThatReadARestrictedDocumentIsMarkedEvenWhenItCitesOnlyASharedOneOrNothing() {
+        long citesShared = answerAfterReadingRestricted(channel, "bonus?", PRIVATE_ANSWER, "0.01", Kind.ANSWER,
+                Confidence.HIGH, List.of(new Citation(1, sharedDoc, "Public handbook", "https://example.com/doc", "x")));
+        long citesNothing = answerAfterReadingRestricted(channel, "bonus again?", PRIVATE_ANSWER, "0.01", Kind.UNKNOWN,
+                Confidence.LOW, List.of());
+        long plain = answer(channel, "handbook?", "Read it.", "0.01", sharedDoc, "Public handbook");
+
+        assertThat(flag(citesShared)).isTrue();
+        assertThat(flag(citesNothing)).isTrue();
+        assertThat(flag(plain)).isFalse();
+        assertThat(interactions.usedRestricted(tenant.id(), List.of(citesShared, citesNothing, plain)))
+                .containsExactlyInAnyOrder(citesShared, citesNothing);
+    }
+
+    @Test
+    void everyAdminViewHidesAnAnswerThatReadARestrictedDocumentWithoutCitingIt() throws Exception {
+        long hidden = answerAfterReadingRestricted(channel, "Secret question about Birchwood", PRIVATE_ANSWER, "40.00",
+                Kind.ANSWER, Confidence.LOW, List.of(new Citation(1, sharedDoc, "Public handbook",
+                        "https://example.com/doc", "x")));
+        feedback.record(tenant.id(), hidden, "U2", Rating.DOWN);
+        long correction = TestData.correction(jdbc, tenant.id(), "PENDING", "Ana", "Secret question about Birchwood",
+                "It closes on Monday.", null, false);
+        jdbc.sql("UPDATE correction SET interaction_id = :i, original_answer = :a WHERE id = :id")
+                .param("i", hidden).param("a", PRIVATE_ANSWER).param("id", correction).update();
+
+        for (String url : List.of("/admin/corrections", "/admin/corrections?tab=unhappy")) {
+            assertThat(page(url)).as(url).doesNotContain(PRIVATE_ANSWER).contains(NOTICE);
+        }
+        assertThat(page("/admin/costs")).doesNotContain("Secret question about Birchwood")
+                .contains("Question not shown (private source)");
+        assertThat(page("/admin/insights")).doesNotContain("Secret question about Birchwood");
+    }
+
     // ---- unhappy answers ---------------------------------------------------------------------
 
     @Test

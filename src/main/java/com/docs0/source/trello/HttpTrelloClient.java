@@ -50,7 +50,7 @@ public class HttpTrelloClient implements TrelloClient {
     static final int DEFAULT_REQUESTS = 90;
     static final Duration DEFAULT_WINDOW = Duration.ofSeconds(10);
     static final int COMMENTS_PER_CARD = 50;
-    private static final int MAX_PAGES = 100;
+    static final int MAX_PAGES = 100;
 
     private static final Logger log = LoggerFactory.getLogger(HttpTrelloClient.class);
     private static final Gson GSON = new Gson();
@@ -126,6 +126,7 @@ public class HttpTrelloClient implements TrelloClient {
         List<Card> cards = new ArrayList<>();
         Set<String> seen = new HashSet<>();
         String before = null;
+        boolean complete = false;
         for (int page = 0; page < MAX_PAGES; page++) {
             Map<String, String> query = new LinkedHashMap<>();
             query.put("filter", "open");
@@ -152,9 +153,14 @@ public class HttpTrelloClient implements TrelloClient {
                 }
             }
             if (array.size() < PAGE || fresh == 0) {
+                complete = true;
                 break;
             }
             before = lastId;
+        }
+        if (!complete) {
+            // Cards missing from a cut-short list would be deleted by the sync: fail instead.
+            throw new IOException("Trello returned more cards than docs0 will read");
         }
         return new BoardContent(text(board, "id"), text(board, "name"), text(board, "desc"), text(board, "shortUrl"),
                 instant(board, "dateLastActivity"), lists, cards);

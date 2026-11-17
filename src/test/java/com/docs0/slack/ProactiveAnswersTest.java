@@ -114,7 +114,7 @@ class ProactiveAnswersTest {
                 usage, judge, slack, p, maxPerHour);
         CorrectionFlow flow = new CorrectionFlow(new CorrectionDetector(new SlackFakes.FakeLlm(), p),
                 new ConversationRepository(jdbc), interactions, new FeedbackRepository(jdbc),
-                new com.docs0.feedback.CorrectionRepository(jdbc), slack);
+                new com.docs0.feedback.CorrectionRepository(jdbc), slack, new TenantService(jdbc), budget);
         return new QuestionHandler(new TenantService(jdbc), agent, knowledgeFake, budget,
                 new ConversationRepository(jdbc), interactions, slack, flow,
                 new com.docs0.action.PendingActionRepository(jdbc), new IdentityService(jdbc, slack), responder,
@@ -210,6 +210,35 @@ class ProactiveAnswersTest {
         assertThat(budget.otherSpentThisMonth(tenantId)).isEqualByComparingTo("1.5");
         // 1.50 judge + 0.05 answer + 0.01 for the seeded earlier answer.
         assertThat(budget.spentThisMonth(tenantId)).isEqualByComparingTo("1.56");
+    }
+
+    @Test
+    void anUnpromptedAnswerInAPublicChannelUsesSharedKnowledgeOnly() throws Exception {
+        slack.publicChannels.add(CHANNEL);
+
+        ask(NEW_QUESTION, "100.1");
+
+        assertThat(agent.requests).singleElement().satisfies(r -> assertThat(r.audience()).isEqualTo(Audience.sharedOnly()));
+    }
+
+    @Test
+    void aShownAnswerWhoseInteractionCouldNotBeLoggedStillCostsSomething() throws Exception {
+        interactions = new InteractionRepository(jdbc) {
+            @Override
+            public long insert(long tenantId, long conversationId, String slackUserId, String question,
+                    AgentResult result, String answerTs) {
+                throw new IllegalStateException("database is busy");
+            }
+        };
+        handler = handler(props, 3);
+
+        ask(NEW_QUESTION, "100.1");
+
+        assertThat(slack.posts).hasSize(1);
+        assertThat(jdbc.sql("SELECT purpose FROM usage_log WHERE tenant_id = :t ORDER BY id").param("t", tenantId)
+                .query(String.class).list()).contains("proactive_answer");
+        assertThat(jdbc.sql("SELECT sum(cost_usd) FROM usage_log WHERE purpose = 'proactive_answer'")
+                .query(java.math.BigDecimal.class).single()).isEqualByComparingTo("0.05");
     }
 
     @Test

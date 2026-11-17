@@ -28,7 +28,7 @@ question + thread history
 
 | Tool | Input | Returns |
 |---|---|---|
-| `search_knowledge` | `query` (keywords or a phrase), optional `limit` (default 8, max 20), optional `source_kinds` (array of `GOOGLE_DRIVE`, `LINEAR`, `TRELLO`, `SLACK`, `GRAIN`; default all) | For each hit: `document_id`, title, source kind, url, owner, modified date, a highlighted snippet, rank. Postgres `websearch_to_tsquery`; if a query has no hits, the tool retries with OR semantics and says so. |
+| `search_knowledge` | `query` (keywords or a phrase), optional `limit` (default 8, max 20), optional `source_kinds` (array of `GOOGLE_DRIVE`, `LINEAR`, `TRELLO`, `SLACK`, `GRAIN`, `GMAIL`; default all) | For each hit: `document_id`, title, source kind, url, owner, modified date, a highlighted snippet, rank. Postgres `websearch_to_tsquery`; if a query has no hits, the tool retries with OR semantics and says so. |
 | `read_document` | `document_id`, optional `offset` | Title, metadata and up to 60,000 characters of body from `offset`, plus `has_more` and `next_offset`. |
 | `list_recent_documents` | optional `limit` | Most recently modified documents. |
 | `list_linear_teams` | none | The selected Linear teams (key, name) and the priorities that can be set. |
@@ -51,6 +51,14 @@ shared knowledge only. The filter is in the SQL of each query, so a document the
 produces no hit, snippet or title, `read_document` on its id gives the same "not found" as a missing
 id, and a citation to it is dropped by the verifier. The model is never told that anything was hidden.
 
+**Who counts as the audience.** Restricted knowledge is for a private audience only. A DM is the one asker;
+a private channel (or group DM) is its members, where each must be covered by the document's principals. A
+**public channel is never a private audience**: anyone in the workspace can read it, so it gets shared knowledge
+only (`Audience.sharedOnly()`), however few members it has. So does any channel whose privacy docs0 cannot
+determine: privacy comes from Slack's `conversations.info` (`is_private`, `is_im`, `is_mpim`), is remembered per
+tenant and channel for five minutes, and a failed lookup means "treat as public". The proactive (unprompted)
+path builds its audience the same way.
+
 Gmail threads (source `GMAIL`, one document per thread, restricted to the mailbox owner and any extra
 viewers) are therefore reachable only in the owner's own DM. The system prompt tells the model that mail is
 private to its owner, to say when something comes from the person's email, to quote only what a message
@@ -59,10 +67,12 @@ says, and never to speculate about other people's mail. `GMAIL` is one of the `s
 
 ### Admin pages and private answers
 
-An interaction is *private* when it cited a restricted document (a private Slack channel, a mailbox). It is
-decided at render time by joining the cited document ids to `document.restricted` (so answers logged before
-Phase 5 are covered), and `interaction.used_restricted` records it at answer time as well; either one makes
-it private. For a private interaction no admin page renders its answer text, cited titles, URLs or quotes:
+An interaction is *private* (`used_restricted`) when a restricted document (a private Slack channel, a
+mailbox) was **returned to the model during the run** by `search_knowledge`, `read_document` or
+`list_recent_documents`, whether or not the answer cites it; the agent records that on the result and the
+interaction stores it at answer time. It is also decided at render time by joining the cited document ids to
+`document.restricted` (so answers logged before the flag existed are covered); either one makes it private.
+Insights, the digest, Costs and the theme call treat it the same way (the question text is withheld too). For a private interaction no admin page renders its answer text, cited titles, URLs or quotes:
 the Corrections page ("Unhappy answers", and the "docs0 answered" original answer of a pending correction
 made in reply to it) shows the notice "This answer used a private source, so it isn't shown here."; the
 Costs page's most-expensive list shows "Question not shown (private source)" instead of the question. The

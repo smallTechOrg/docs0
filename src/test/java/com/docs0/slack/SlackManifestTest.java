@@ -52,6 +52,16 @@ class SlackManifestTest {
     }
 
     @Test
+    void bothManifestsSubscribeToTheUninstallEventsTheHttpHandlersExpect() throws Exception {
+        for (String file : List.of("manifest.yml", "manifest-distributed.yml")) {
+            assertThat(botEvents(load(file))).as(file).contains("app_uninstalled", "tokens_revoked");
+        }
+        assertThat(SlackScopes.BOT_EVENTS).contains("app_uninstalled", "tokens_revoked");
+        // Nothing in docs0 calls an API that needs im:read: a DM is known from the event itself.
+        assertThat(SlackScopes.BOT).doesNotContain("im:read");
+    }
+
+    @Test
     void theDistributedManifestUsesHttpInsteadOfSocketMode() throws Exception {
         Map<String, Object> settings = map(load("manifest-distributed.yml"), "settings");
 

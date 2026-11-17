@@ -31,6 +31,9 @@ docs0:
   budget:
     # Hard monthly spend cap per tenant, in USD. 0 disables the cap.
     monthly-usd: ${DOCS0_MONTHLY_BUDGET_USD:100}
+  # Monthly cap in USD for a company that installs docs0 itself (Add to Slack). 0 refuses every question. The
+  # pilot company uses the global cap above. Blank: 5.
+  new-tenant-budget-usd: ${DOCS0_NEW_TENANT_BUDGET_USD:5}
   slack:
     bot-token: ${DOCS0_SLACK_BOT_TOKEN:}
     app-token: ${DOCS0_SLACK_APP_TOKEN:}

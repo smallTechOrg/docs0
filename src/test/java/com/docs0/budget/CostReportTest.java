@@ -99,4 +99,23 @@ class CostReportTest {
         assertThat(report.topQuestionsThisMonth(tenant, 10)).extracting(Expensive::question).containsExactly("ours");
         assertThat(new BudgetService(jdbc, null).spentThisMonth(other)).isEqualByComparingTo("7.00");
     }
+
+    @Test
+    void daysAndTheMonthFollowTheInjectedClockAcrossAMonthBoundary() {
+        add(thread, "november", "0.50", Instant.parse("2026-11-30T22:00:00Z"));
+        add(thread, "december", "0.25", Instant.parse("2026-12-01T01:00:00Z"));
+        CostReport onTheFirst = new CostReport(jdbc,
+                java.time.Clock.fixed(Instant.parse("2026-12-01T09:00:00Z"), ZoneOffset.UTC));
+
+        assertThat(onTheFirst.perDay(tenant, 1)).extracting(Day::day).containsExactly(LocalDate.parse("2026-12-01"));
+        assertThat(onTheFirst.perDay(tenant, 2)).extracting(Day::day)
+                .containsExactly(LocalDate.parse("2026-12-01"), LocalDate.parse("2026-11-30"));
+        // "This month" on 1 December is December only.
+        assertThat(onTheFirst.topQuestionsThisMonth(tenant, 10)).extracting(CostReport.Expensive::question)
+                .containsExactly("december");
+        CostReport lastDay = new CostReport(jdbc,
+                java.time.Clock.fixed(Instant.parse("2026-11-30T23:00:00Z"), ZoneOffset.UTC));
+        assertThat(lastDay.topQuestionsThisMonth(tenant, 10)).extracting(CostReport.Expensive::question)
+                .containsExactly("november", "december");
+    }
 }

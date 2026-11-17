@@ -135,6 +135,8 @@ public class InsightsController {
         model.addAttribute("repeatDownPercent", totals.repeatThumbsDownPercent());
         model.addAttribute("themeStatus", themeResult.status().name());
         model.addAttribute("themes", themeResult.themes());
+        model.addAttribute("themesAskedPrivately", themeResult.askedPrivately());
+        model.addAttribute("themesUsedPrivate", themeResult.usedPrivateSources());
         model.addAttribute("themesAt", themeResult.computedAt() == null ? null : TIME.format(themeResult.computedAt()));
         model.addAttribute("gaps", gapRows);
         model.addAttribute("gapsMore", Math.max(0, gaps.items().size() - GAPS_SHOWN));

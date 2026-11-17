@@ -37,8 +37,8 @@ public class JdbcKnowledgeSearch implements KnowledgeSearch {
      * given a snippet and never counted against the limit.
      */
     private static final String SEARCH_SQL = """
-            SELECT r.id, r.title, r.kind, r.url, r.owner_name, r.modified_at, r.rank,
-                   ts_headline('english', left(d.body, 200000), r.tsq, :options) AS snippet
+            SELECT r.id, r.title, r.kind, r.url, r.owner_name, r.modified_at, r.rank, d.restricted,
+                   ts_headline('english', left(d.body, 400000), r.tsq, :options) AS snippet
             FROM (
                 SELECT d.id, d.title, s.kind, d.url, d.owner_name, d.modified_at, q.tsq,
                        ts_rank_cd(d.search, q.tsq) AS rank
@@ -136,7 +136,7 @@ public class JdbcKnowledgeSearch implements KnowledgeSearch {
         // A document the audience may not see is indistinguishable from one that does not exist.
         return jdbc.sql("""
                         SELECT d.id, d.tenant_id, d.source_id, s.kind, d.external_id, d.title, d.mime_type, d.url,
-                               d.owner_name, d.owner_email, d.modified_at, d.body
+                               d.owner_name, d.owner_email, d.modified_at, d.body, d.restricted
                         FROM document d
                         JOIN source s ON s.id = d.source_id AND s.tenant_id = d.tenant_id
                         WHERE d.tenant_id = :tenant AND d.id = :id AND NOT d.deleted AND %s
@@ -147,14 +147,15 @@ public class JdbcKnowledgeSearch implements KnowledgeSearch {
                 .query((rs, n) -> new Document(rs.getLong("id"), rs.getLong("tenant_id"), rs.getLong("source_id"),
                         rs.getString("kind"), rs.getString("external_id"), rs.getString("title"),
                         rs.getString("mime_type"), rs.getString("url"), rs.getString("owner_name"),
-                        rs.getString("owner_email"), instant(rs, "modified_at"), rs.getString("body")))
+                        rs.getString("owner_email"), instant(rs, "modified_at"), rs.getString("body"),
+                        rs.getBoolean("restricted")))
                 .optional();
     }
 
     @Override
     public List<SearchHit> recent(long tenantId, Audience audience, int limit) {
         return jdbc.sql("""
-                        SELECT d.id, d.title, s.kind, d.url, d.owner_name, d.modified_at,
+                        SELECT d.id, d.title, s.kind, d.url, d.owner_name, d.modified_at, d.restricted,
                                left(d.body, :chars) AS snippet
                         FROM document d
                         JOIN source s ON s.id = d.source_id AND s.tenant_id = d.tenant_id
@@ -196,7 +197,7 @@ public class JdbcKnowledgeSearch implements KnowledgeSearch {
         String snippet = rs.getString("snippet");
         return new SearchHit(rs.getLong("id"), rs.getString("title"), rs.getString("kind"), rs.getString("url"),
                 rs.getString("owner_name"), instant(rs, "modified_at"),
-                snippet == null ? "" : snippet.replaceAll("\\s+", " ").trim(), rank);
+                snippet == null ? "" : snippet.replaceAll("\\s+", " ").trim(), rank, rs.getBoolean("restricted"));
     }
 
     private static Instant instant(ResultSet rs, String column) throws SQLException {

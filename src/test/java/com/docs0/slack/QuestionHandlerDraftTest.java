@@ -50,7 +50,8 @@ class QuestionHandlerDraftTest {
         pending = new PendingActionRepository(jdbc);
         CorrectionFlow flow = new CorrectionFlow(new CorrectionDetector(llm, props), new ConversationRepository(jdbc),
                 new InteractionRepository(jdbc), new com.docs0.feedback.FeedbackRepository(jdbc),
-                new com.docs0.feedback.CorrectionRepository(jdbc), slack);
+                new com.docs0.feedback.CorrectionRepository(jdbc), slack, new TenantService(jdbc),
+                new BudgetService(jdbc, props));
         handler = new QuestionHandler(new TenantService(jdbc), agent, new FakeKnowledge(),
                 new BudgetService(jdbc, props), new ConversationRepository(jdbc), new InteractionRepository(jdbc), slack,
                 flow, pending, new IdentityService(jdbc, slack), Duration.ZERO);

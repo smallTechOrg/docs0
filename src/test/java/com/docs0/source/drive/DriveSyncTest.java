@@ -309,6 +309,35 @@ class DriveSyncTest extends IntegrationTest {
     }
 
     @Test
+    void chosenFoldersThatComeBackEmptyKeepTheirDocumentsUntilTheAdminRemovesThemFromTheSelection() {
+        drive.put("a", "Alpha", "text/plain", T0, "alpha okapi");
+        drive.put("b", "Beta", "text/plain", T0, "beta okapi");
+        syncService.run(tenant.id(), connector);
+
+        // Drive suddenly lists nothing for the chosen folder (lost permission, moved folder, an outage).
+        drive.remove("a");
+        drive.remove("b");
+        SyncRun run = syncService.run(tenant.id(), connector).orElseThrow();
+
+        assertThat(run.status()).isEqualTo(SyncRun.FAILED);
+        assertThat(run.error()).contains("returned no files").contains("were kept").contains("remove them from the selection");
+        assertThat(search.count(tenant.id())).isEqualTo(2);
+        assertThat(connector.status(tenant.id()).state()).isEqualTo(State.DOWN);
+
+        // Taking the folder off the selection is how an admin says they really are gone.
+        connection.removeFolder(tenant.id(), FakeDriveClient.MAIN);
+        scheduler(connector).syncAll();
+        assertThat(search.count(tenant.id())).isZero();
+    }
+
+    @Test
+    void anEmptyFolderWithNothingStoredIsNotAnError() {
+        SyncRun run = syncService.run(tenant.id(), connector).orElseThrow();
+
+        assertThat(run.status()).isEqualTo(SyncRun.OK);
+    }
+
+    @Test
     void clearingTheSelectionDropsEveryDocumentAtTheNextSyncWithoutCallingDrive() {
         drive.put("a", "Alpha", "text/plain", T0, "alpha okapi");
         drive.put("b", "Beta", "text/plain", T0, "beta okapi");

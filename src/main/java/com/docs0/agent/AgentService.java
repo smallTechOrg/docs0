@@ -169,6 +169,7 @@ public class AgentService implements Agent, StatusContributor {
                             ? actions.run(call.name(), call.input(), request, run::progress, run.drafts)
                             : tools.run(call.name(), call.input(), request.tenantId(), request.audience(),
                                     run::progress);
+                    run.usedRestricted |= output.restricted();
                     results.add(new ToolResult(call.id(), output.content(), output.isError()));
                 }
             }
@@ -205,10 +206,10 @@ public class AgentService implements Agent, StatusContributor {
             for (CorrectionSource.ApprovedCorrection c : approved) {
                 message.append("<correction>\n");
                 if (c.question() != null) {
-                    message.append("<asked_on>").append(c.question()).append("</asked_on>\n");
+                    message.append("<asked_on>").append(inert(c.question())).append("</asked_on>\n");
                 }
-                message.append("<fact>").append(c.fact()).append("</fact>\n");
-                message.append("<corrected_by>").append(c.authorName()).append("</corrected_by>\n");
+                message.append("<fact>").append(inert(c.fact())).append("</fact>\n");
+                message.append("<corrected_by>").append(inert(c.authorName())).append("</corrected_by>\n");
                 message.append("<date>").append(CORRECTION_DATE.format(c.correctedAt())).append("</date>\n");
                 message.append("</correction>\n");
             }
@@ -227,6 +228,14 @@ public class AgentService implements Agent, StatusContributor {
         }
         message.append("The question to answer now:\n<question>").append(request.question()).append("</question>");
         return message.toString();
+    }
+
+    /**
+     * Text from a person, made safe to sit between the delimiter tags of the corrections block: angle brackets
+     * become entities, so no tag or closing tag in it can end or fake a block.
+     */
+    static String inert(String text) {
+        return text == null ? "" : text.replace("<", "&lt;").replace(">", "&gt;");
     }
 
     /** The submitted answer as a {@link Draft}, or a String explaining what is wrong with the input. */
@@ -294,6 +303,7 @@ public class AgentService implements Agent, StatusContributor {
         private long inputTokens;
         private long outputTokens;
         private List<Long> correctionIds = List.of();
+        private boolean usedRestricted;
         private final List<PendingAction> drafts = new ArrayList<>();
 
         Run(ProgressListener listener) {
@@ -331,7 +341,7 @@ public class AgentService implements Agent, StatusContributor {
             long durationMs = (System.nanoTime() - startedNanos) / 1_000_000;
             return new AgentResult(
                     kind, answer, confidence, citations, followUps, suggestedPeople, steps, inputTokens,
-                    outputTokens, cost(), durationMs, error, correctionIds, List.copyOf(drafts));
+                    outputTokens, cost(), durationMs, error, correctionIds, List.copyOf(drafts), usedRestricted);
         }
 
         private BigDecimal cost() {

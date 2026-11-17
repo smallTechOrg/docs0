@@ -225,7 +225,7 @@ class InsightsPageTest extends com.docs0.Phase6IntegrationTest {
     }
 
     @Test
-    void directMessageQuestionsCountTowardThemesButAreNeverQuotedOrShown() throws Exception {
+    void directMessageAndPrivateSourceQuestionsAreNeverSentToTheModelOrShownOnlyCounted() throws Exception {
         answered(channel, "How do refunds work?");
         answered(dm, "What is my colleague Birgit's salary?");
         long privateAnswer = answered(channel, "What is the Birchwood bonus pool?");
@@ -241,11 +241,11 @@ class InsightsPageTest extends com.docs0.Phase6IntegrationTest {
 
         String prompt = llm.asked.get(0);
         assertThat(prompt).contains("[0] How do refunds work?");
-        String other = prompt.substring(prompt.indexOf("<other_questions>"));
-        assertThat(other).contains("Birgit's salary").contains("Birchwood bonus pool");
-        assertThat(prompt.substring(0, prompt.indexOf("<other_questions>"))).doesNotContain("Birgit")
-                .doesNotContain("Birchwood");
+        // The model never sees the private questions, not even as text without an id.
+        assertThat(prompt).doesNotContain("Birgit").doesNotContain("Birchwood").doesNotContain("salary")
+                .doesNotContain("bonus");
         assertThat(html).doesNotContain("Birgit").doesNotContain("Birchwood").contains("How do refunds work?");
+        assertThat(html).contains("1</span> questions asked privately and <span>1</span> that used private sources");
         assertThat(secretDoc).isPositive();
     }
 

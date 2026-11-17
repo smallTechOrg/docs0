@@ -170,6 +170,25 @@ class GmailSyncTest extends IntegrationTest {
         assertThat(sync().added()).isEqualTo(5);
     }
 
+    @Test
+    void aMailboxListCutShortByThePageLimitFailsThatMailboxAndDeletesNothing() throws Exception {
+        for (int i = 1; i <= 501; i++) {
+            gmail.put(ANA, "t" + i, "h" + i, "Thread " + i, "text " + i, T0.plusSeconds(i));
+        }
+        choose(box(ANA));
+        gmail.pageSize = 1000;
+        assertThat(sync().added()).isEqualTo(501);
+
+        // One thread per page: 501 pages is more than docs0 will read, so the list is incomplete.
+        gmail.pageSize = 1;
+        SyncCounts counts = sync();
+
+        assertThat(counts.failed()).isEqualTo(1);
+        assertThat(counts.removed()).isZero();
+        assertThat(live()).hasSize(501);
+        assertThat(connector.notes(tenant.id()).get(ANA)).contains("this time");
+    }
+
     // ---- changes -----------------------------------------------------------------------------
 
     @Test

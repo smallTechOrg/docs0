@@ -25,7 +25,7 @@ with links and quoted snippets, and it learns from the team's corrections.
 | Cost | Hidden from the team. Totals on the admin dashboard. Hard cap of $100 per month; docs0 stops answering when it is reached. Model: Claude Sonnet 5.5. |
 | Audit | Admin sees corrections and answers people were unhappy with. |
 | Scale | Under ~5k Drive files. Content fresh within the hour. |
-| Stack | Java backend (binding). Anthropic is the only AI provider. Slack Socket Mode. Drive is connected by an admin signing in with Google on the dashboard (no service account). |
+| Stack | Java backend (binding). Anthropic is the only AI provider. Slack via Bolt for Java: Socket Mode for the single-company pilot, HTTP events (own signature-verified controller) for the distributed app. Drive is connected by an admin signing in with Google on the dashboard (no service account). |
 
 ## Assumptions
 

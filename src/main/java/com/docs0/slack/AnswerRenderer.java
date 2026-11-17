@@ -101,7 +101,7 @@ public final class AnswerRenderer {
     }
 
     private static Rendered renderAnswer(AgentResult result, java.time.Instant staleSince) {
-        String answer = toMrkdwn(result.answer());
+        String answer = toMrkdwn(result.answer(), linkHosts(result.citations()));
         if (answer.isBlank()) {
             answer = EMPTY_ANSWER;
         }
@@ -224,8 +224,52 @@ public final class AnswerRenderer {
         return out.toString();
     }
 
-    /** Converts the model's markdown to Slack mrkdwn and escapes Slack's control characters. */
+    /** The hosts of the cited documents' https URLs: the only places an answer's own links may lead (besides Slack). */
+    static java.util.Set<String> linkHosts(List<Citation> citations) {
+        java.util.Set<String> hosts = new java.util.HashSet<>();
+        if (citations != null) {
+            for (Citation c : citations) {
+                String host = httpsHost(c.url());
+                if (host != null) {
+                    hosts.add(host);
+                }
+            }
+        }
+        return hosts;
+    }
+
+    /** The lower-case host of an https URL, or null for anything else. */
+    private static String httpsHost(String url) {
+        if (url == null) {
+            return null;
+        }
+        try {
+            java.net.URI uri = new java.net.URI(url.strip());
+            if (!"https".equalsIgnoreCase(uri.getScheme()) || uri.getHost() == null) {
+                return null;
+            }
+            return uri.getHost().toLowerCase(java.util.Locale.ROOT);
+        } catch (java.net.URISyntaxException e) {
+            return null;
+        }
+    }
+
+    private static boolean mayLinkTo(String url, java.util.Set<String> hosts) {
+        String host = httpsHost(url);
+        return host != null && (hosts.contains(host) || host.equals("slack.com") || host.endsWith(".slack.com"));
+    }
+
+    /** Converts the model's markdown to Slack mrkdwn and escapes Slack's control characters. No link is kept. */
     static String toMrkdwn(String markdown) {
+        return toMrkdwn(markdown, java.util.Set.of());
+    }
+
+    /**
+     * Converts the model's markdown to Slack mrkdwn and escapes Slack's control characters. A link stays a link only
+     * when it is https and leads to {@code linkHosts} or to Slack; any other URL is shown as code, so the text of an
+     * answer can never be a clickable link to somewhere the cited documents do not lead.
+     */
+    static String toMrkdwn(String markdown, java.util.Set<String> linkHosts) {
         if (markdown == null) {
             return "";
         }
@@ -249,33 +293,43 @@ public final class AnswerRenderer {
             Matcher quote = QUOTE.matcher(line);
             if (heading.matches()) {
                 String text = heading.group(1).replace("**", "").replace("__", "");
-                out.append('*').append(inline(text)).append('*');
+                out.append('*').append(inline(text, linkHosts)).append('*');
             } else if (bullet.matches()) {
-                out.append(bullet.group(1)).append("• ").append(inline(bullet.group(2)));
+                out.append(bullet.group(1)).append("• ").append(inline(bullet.group(2), linkHosts));
             } else if (quote.matches()) {
-                out.append("> ").append(inline(quote.group(1)));
+                out.append("> ").append(inline(quote.group(1), linkHosts));
             } else {
-                out.append(inline(line));
+                out.append(inline(line, linkHosts));
             }
         }
         return out.toString();
     }
 
     /** Converts links, code spans and bold within one line; everything else is escaped. */
-    private static String inline(String text) {
+    private static String inline(String text, java.util.Set<String> linkHosts) {
         StringBuilder out = new StringBuilder();
         Matcher m = INLINE.matcher(text);
         int from = 0;
         while (m.find()) {
             out.append(plain(text.substring(from, m.start())));
             if (m.group(2) != null) {
-                out.append('<').append(linkUrl(m.group(2))).append('|').append(plain(m.group(1))).append('>');
-            } else if (m.group(3) != null) {
-                out.append('<').append(linkUrl(m.group(3)));
-                if (m.group(4) != null && !m.group(4).isEmpty()) {
-                    out.append('|').append(plain(m.group(4)));
+                if (mayLinkTo(m.group(2), linkHosts)) {
+                    out.append('<').append(linkUrl(m.group(2))).append('|').append(plain(m.group(1))).append('>');
+                } else {
+                    out.append(plain(m.group(1))).append(" (").append(code(m.group(2))).append(')');
                 }
-                out.append('>');
+            } else if (m.group(3) != null) {
+                if (mayLinkTo(m.group(3), linkHosts)) {
+                    out.append('<').append(linkUrl(m.group(3)));
+                    if (m.group(4) != null && !m.group(4).isEmpty()) {
+                        out.append('|').append(plain(m.group(4)));
+                    }
+                    out.append('>');
+                } else if (m.group(4) != null && !m.group(4).isEmpty()) {
+                    out.append(plain(m.group(4))).append(" (").append(code(m.group(3))).append(')');
+                } else {
+                    out.append(code(m.group(3)));
+                }
             } else {
                 out.append('`').append(escape(m.group(5))).append('`');
             }
@@ -283,6 +337,11 @@ public final class AnswerRenderer {
         }
         out.append(plain(text.substring(from)));
         return out.toString();
+    }
+
+    /** Text in a code span: Slack shows it as it is and never links it. */
+    private static String code(String text) {
+        return '`' + escape(text.replace("`", "")) + '`';
     }
 
     private static String plain(String text) {

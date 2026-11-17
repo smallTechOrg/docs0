@@ -1,10 +1,12 @@
 package com.docs0.budget;
 
 import java.math.BigDecimal;
+import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
 import java.util.List;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Service;
 
@@ -20,14 +22,25 @@ public class CostReport {
     public record Expensive(long interactionId, String question, boolean dm, BigDecimal costUsd, Instant createdAt) {}
 
     private final JdbcClient jdbc;
+    private final Clock clock;
+
+    @Autowired
+    public CostReport(JdbcClient jdbc, Clock clock) {
+        this.jdbc = jdbc;
+        this.clock = clock;
+    }
 
     public CostReport(JdbcClient jdbc) {
-        this.jdbc = jdbc;
+        this(jdbc, Clock.systemUTC());
+    }
+
+    private LocalDate today() {
+        return LocalDate.now(clock.withZone(ZoneOffset.UTC));
     }
 
     /** Totals for each of the last {@code days} UTC days (today included) that had questions, newest first. */
     public List<Day> perDay(long tenantId, int days) {
-        var from = LocalDate.now(ZoneOffset.UTC).minusDays(days - 1L).atStartOfDay().atOffset(ZoneOffset.UTC);
+        var from = today().minusDays(days - 1L).atStartOfDay().atOffset(ZoneOffset.UTC);
         return jdbc.sql("""
                         SELECT (created_at AT TIME ZONE 'UTC')::date AS day, count(*) AS questions,
                                sum(input_tokens) AS input_tokens, sum(output_tokens) AS output_tokens,
@@ -44,7 +57,7 @@ public class CostReport {
 
     /** What the model calls that are not a question cost in the last {@code days} UTC days (today included). */
     public BigDecimal otherSpend(long tenantId, int days) {
-        var from = LocalDate.now(ZoneOffset.UTC).minusDays(days - 1L).atStartOfDay().atOffset(ZoneOffset.UTC);
+        var from = today().minusDays(days - 1L).atStartOfDay().atOffset(ZoneOffset.UTC);
         return jdbc.sql("""
                         SELECT coalesce(sum(cost_usd), 0) FROM usage_log
                         WHERE tenant_id = :tenantId AND created_at >= :from
@@ -55,7 +68,7 @@ public class CostReport {
 
     /** The questions that cost the most this calendar month (UTC), dearest first. */
     public List<Expensive> topQuestionsThisMonth(long tenantId, int limit) {
-        var monthStart = LocalDate.now(ZoneOffset.UTC).withDayOfMonth(1).atStartOfDay().atOffset(ZoneOffset.UTC);
+        var monthStart = today().withDayOfMonth(1).atStartOfDay().atOffset(ZoneOffset.UTC);
         return jdbc.sql("""
                         SELECT i.id, i.question, c.is_dm, i.cost_usd, i.created_at
                         FROM interaction i JOIN conversation c ON c.id = i.conversation_id AND c.tenant_id = i.tenant_id

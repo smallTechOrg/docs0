@@ -87,6 +87,20 @@ final class SlackFakes {
             return channelMembers.getOrDefault(channel, members);
         }
 
+        /** Channels Slack says are public. Every other channel is private, as before the public-channel rule. */
+        final Set<String> publicChannels = java.util.concurrent.ConcurrentHashMap.newKeySet();
+        final AtomicInteger privacyLookups = new AtomicInteger();
+        volatile boolean privacyLookupFails;
+
+        @Override
+        public ChannelPrivacy channelPrivacy(String channel) {
+            privacyLookups.incrementAndGet();
+            if (privacyLookupFails) {
+                throw new SlackCallException("conversations.info", "missing_scope", null);
+            }
+            return publicChannels.contains(channel) ? ChannelPrivacy.PUBLIC : ChannelPrivacy.PRIVATE;
+        }
+
         @Override
         public String userDisplayName(String userId) {
             if (nameLookupFails) {

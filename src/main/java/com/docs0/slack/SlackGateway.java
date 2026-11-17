@@ -8,6 +8,7 @@ import com.slack.api.bolt.App;
 import com.slack.api.bolt.AppConfig;
 import com.slack.api.bolt.socket_mode.SocketModeApp;
 import com.slack.api.model.event.AppMentionEvent;
+import com.slack.api.model.event.AppUninstalledEvent;
 import com.slack.api.model.event.MessageBotEvent;
 import com.slack.api.model.event.MessageChangedEvent;
 import com.slack.api.model.event.MessageChannelJoinEvent;
@@ -17,6 +18,7 @@ import com.slack.api.model.event.MessageFileShareEvent;
 import com.slack.api.model.event.MessageThreadBroadcastEvent;
 import com.slack.api.model.event.ReactionAddedEvent;
 import com.slack.api.model.event.ReactionRemovedEvent;
+import com.slack.api.model.event.TokensRevokedEvent;
 import com.slack.api.socket_mode.SocketModeClient;
 import jakarta.annotation.PreDestroy;
 import java.util.Optional;
@@ -190,6 +192,10 @@ public class SlackGateway implements StatusContributor {
         app.event(MessageChannelJoinEvent.class, (payload, ctx) -> ctx.ack());
         app.event(MessageFileShareEvent.class, (payload, ctx) -> ctx.ack());
         app.event(MessageThreadBroadcastEvent.class, (payload, ctx) -> ctx.ack());
+        // The company pilot has one fixed workspace: removing the app there ends the connection by itself. The
+        // distributed app handles these over HTTP (SlackHttpEvents).
+        app.event(AppUninstalledEvent.class, (payload, ctx) -> ctx.ack());
+        app.event(TokensRevokedEvent.class, (payload, ctx) -> ctx.ack());
         // Thumbs up and down on answers are feedback.
         app.event(ReactionAddedEvent.class, (payload, ctx) -> {
             reactionAdded(payload.getTeamId(), payload.getEvent());

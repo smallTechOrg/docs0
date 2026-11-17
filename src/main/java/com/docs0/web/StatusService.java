@@ -1,6 +1,7 @@
 package com.docs0.web;
 
 import com.docs0.budget.BudgetService;
+import com.docs0.feedback.CorrectionRepository;
 import com.docs0.tenant.Tenant;
 import com.docs0.tenant.TenantService;
 import com.docs0.web.StatusContributor.ComponentStatus;
@@ -27,10 +28,12 @@ public class StatusService {
     private final JdbcClient jdbc;
     private final TenantService tenants;
     private final BudgetService budget;
+    private final CorrectionRepository corrections;
     private final List<StatusContributor> contributors;
 
     public StatusService(JdbcClient jdbc, TenantService tenants, BudgetService budget,
-                         List<StatusContributor> contributors) {
+                         CorrectionRepository corrections, List<StatusContributor> contributors) {
+        this.corrections = corrections;
         this.jdbc = jdbc;
         this.tenants = tenants;
         this.budget = budget;
@@ -56,9 +59,7 @@ public class StatusService {
                 .param("t", tenant.id()).query(Long.class).single();
         long questions = jdbc.sql("SELECT count(*) FROM interaction WHERE tenant_id = :t")
                 .param("t", tenant.id()).query(Long.class).single();
-        long pendingCorrections = jdbc.sql(
-                        "SELECT count(*) FROM correction WHERE tenant_id = :t AND status = 'PENDING'")
-                .param("t", tenant.id()).query(Long.class).single();
+        long pendingCorrections = corrections.countPending(tenant.id());
         Optional<LastSync> lastSync = jdbc.sql("""
                         SELECT s.name, r.status, r.started_at, r.finished_at, r.added, r.updated, r.removed,
                                r.skipped, r.failed, r.error

@@ -53,7 +53,8 @@ class AudienceFromSlackTest {
         SlackFakes.FakeLlm llm = new SlackFakes.FakeLlm();
         CorrectionFlow flow = new CorrectionFlow(new CorrectionDetector(llm, props), new ConversationRepository(jdbc),
                 new InteractionRepository(jdbc), new com.docs0.feedback.FeedbackRepository(jdbc),
-                new com.docs0.feedback.CorrectionRepository(jdbc), slack);
+                new com.docs0.feedback.CorrectionRepository(jdbc), slack, new TenantService(jdbc),
+                new BudgetService(jdbc, props));
         handler = new QuestionHandler(new TenantService(jdbc), agent, new FakeKnowledge(),
                 new BudgetService(jdbc, props), new ConversationRepository(jdbc), new InteractionRepository(jdbc), slack,
                 flow, new com.docs0.action.PendingActionRepository(jdbc), identities, Duration.ZERO);
@@ -212,6 +213,48 @@ class AudienceFromSlackTest {
         ask(CHANNEL, "U1");
 
         assertThat(lastAudience().members()).isEmpty();
+    }
+
+    @Test
+    void aPublicChannelIsNeverAPrivateAudienceEvenWhenEveryMemberIsEntitled() throws Exception {
+        long source = new SourceRepository(jdbc).findOrCreate(tenantId, "SLACK", "Slack history", "SHARED").id();
+        new DocumentStore(jdbc).upsertRestricted(tenantId, source, new DocumentWrite("thread:C8:1.1",
+                "Okapi in the leads channel", "text/plain", "u", "P", null, Instant.now(), "okapi leads only"),
+                Set.of("u1", "u2"));
+        slack.members = Set.of("U1", "U2", "UBOT");
+        JdbcKnowledgeSearch search = new JdbcKnowledgeSearch(jdbc);
+
+        // A private channel of exactly these two people may see it ...
+        ask(CHANNEL, "U1");
+        assertThat(search.search(tenantId, lastAudience(), "okapi", 10).hits()).hasSize(1);
+
+        // ... a public channel with the same two members may not: anyone in the workspace can read it.
+        slack.publicChannels.add("C101");
+        ask("C101", "U1");
+        assertThat(lastAudience()).isEqualTo(Audience.sharedOnly());
+        assertThat(search.search(tenantId, lastAudience(), "okapi", 10).hits()).isEmpty();
+    }
+
+    @Test
+    void aChannelWhosePrivacySlackCannotSayIsTreatedAsPublic() throws Exception {
+        slack.members = Set.of("U1", "U2", "UBOT");
+        slack.privacyLookupFails = true;
+
+        ask(CHANNEL, "U1");
+
+        assertThat(lastAudience()).isEqualTo(Audience.sharedOnly());
+    }
+
+    @Test
+    void aDmNeedsNoPrivacyLookupAndAChannelsPrivacyIsRememberedForAWhile() throws Exception {
+        slack.members = Set.of("U1", "U2", "UBOT");
+        ask("D200", "U1");
+        assertThat(slack.privacyLookups.get()).isZero();
+
+        ask(CHANNEL, "U1");
+        ask(CHANNEL, "U2");
+
+        assertThat(slack.privacyLookups.get()).isEqualTo(1);
     }
 
     @Test

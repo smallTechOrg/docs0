@@ -80,7 +80,8 @@ class TwoTenantSlackTest {
         ConversationRepository conversations = new ConversationRepository(jdbc);
         InteractionRepository interactions = new InteractionRepository(jdbc);
         CorrectionFlow flow = new CorrectionFlow(new CorrectionDetector(llm, props), conversations, interactions,
-                new FeedbackRepository(jdbc), new CorrectionRepository(jdbc), messengers);
+                new FeedbackRepository(jdbc), new CorrectionRepository(jdbc), messengers, tenants,
+                new BudgetService(jdbc, props));
         return new QuestionHandler(tenants, agent, new FakeKnowledge(), new BudgetService(jdbc, props), conversations,
                 interactions, messengers, flow, pending, new IdentityService(jdbc, messengers), Duration.ZERO);
     }

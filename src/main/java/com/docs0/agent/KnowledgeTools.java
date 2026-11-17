@@ -45,15 +45,26 @@ final class KnowledgeTools {
     private static final Logger log = LoggerFactory.getLogger(KnowledgeTools.class);
     private static final DateTimeFormatter DAY = DateTimeFormatter.ISO_LOCAL_DATE.withZone(ZoneOffset.UTC);
 
-    /** Text of a tool result and whether it is an error. */
-    record Output(String content, boolean isError) {
+    /**
+     * Text of a tool result and whether it is an error. {@code restricted}: the result carried a restricted
+     * document (listed or read), so the answer may be built on a private source whether or not it cites it.
+     */
+    record Output(String content, boolean isError, boolean restricted) {
+
+        Output(String content, boolean isError) {
+            this(content, isError, false);
+        }
 
         static Output ok(String content) {
-            return new Output(content, false);
+            return new Output(content, false, false);
+        }
+
+        static Output ok(String content, boolean restricted) {
+            return new Output(content, false, restricted);
         }
 
         static Output error(String content) {
-            return new Output(content, true);
+            return new Output(content, true, false);
         }
     }
 
@@ -236,7 +247,7 @@ final class KnowledgeTools {
                     + "any of them. These results may be only loosely related.\n");
         }
         appendHits(out, result.hits());
-        return Output.ok(out.toString());
+        return Output.ok(out.toString(), result.hits().stream().anyMatch(SearchHit::restricted));
     }
 
     private Output read(Map<String, Object> input, long tenantId, Audience audience, ProgressListener progress) {
@@ -289,7 +300,7 @@ final class KnowledgeTools {
         }
         out.append("--- body, characters ").append(start).append(" to ").append(end).append(" ---\n");
         out.append(body, start, end);
-        return Output.ok(out.toString());
+        return Output.ok(out.toString(), document.restricted());
     }
 
     private Output recent(Map<String, Object> input, long tenantId, Audience audience, ProgressListener progress) {
@@ -309,7 +320,7 @@ final class KnowledgeTools {
         StringBuilder out = new StringBuilder();
         out.append("The ").append(hits.size()).append(" most recently modified document(s), newest first.\n");
         appendHits(out, hits);
-        return Output.ok(out.toString());
+        return Output.ok(out.toString(), hits.stream().anyMatch(SearchHit::restricted));
     }
 
     private static void appendHits(StringBuilder out, List<SearchHit> hits) {

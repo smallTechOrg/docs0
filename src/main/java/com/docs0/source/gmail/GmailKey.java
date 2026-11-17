@@ -16,6 +16,9 @@ import java.util.Optional;
 public record GmailKey(String email, String clientId) {
 
     private static final int MAX_CHARS = 20_000;
+    private static final int MAX_FIELD_CHARS = 500;
+    /** The only place a stored key may ever ask for a token. A key naming another host is refused. */
+    static final String TOKEN_URI = "https://oauth2.googleapis.com/token";
     private static final Gson GSON = new Gson();
 
     /**
@@ -34,12 +37,21 @@ public record GmailKey(String email, String clientId) {
             String email = text(o, "client_email");
             String clientId = text(o, "client_id");
             String privateKey = text(o, "private_key");
+            String tokenUri = text(o, "token_uri");
+            String keyId = text(o, "private_key_id");
+            if (tokenUri != null && !TOKEN_URI.equals(tokenUri)
+                    || email != null && email.length() > MAX_FIELD_CHARS
+                    || keyId != null && keyId.length() > MAX_FIELD_CHARS) {
+                return Optional.empty();
+            }
             if (email == null || clientId == null || privateKey == null || !privateKey.contains("PRIVATE KEY")
                     || !clientId.matches("[0-9]{5,40}")) {
                 return Optional.empty();
             }
-            // Also proves the private key itself can be read.
-            ServiceAccountCredentials.fromStream(new ByteArrayInputStream(json.getBytes(StandardCharsets.UTF_8)));
+            // Also proves the private key itself can be read. A key without token_uri gets the standard one.
+            o.addProperty("token_uri", TOKEN_URI);
+            ServiceAccountCredentials.fromStream(new ByteArrayInputStream(
+                    GSON.toJson(o).getBytes(StandardCharsets.UTF_8)));
             return Optional.of(new GmailKey(email.strip(), clientId.strip()));
         } catch (IOException | RuntimeException e) {
             return Optional.empty();

@@ -186,6 +186,26 @@ class HttpTrelloClientTest {
     }
 
     @Test
+    void aBoardWithMoreCardsThanThePageLimitFailsInsteadOfReturningAPartialBoard() {
+        route("GET /1/boards/b1", Resp.ok("{\"id\": \"b1\", \"name\": \"Huge\"}"));
+        route("GET /1/boards/b1/lists", Resp.ok("[]"));
+        route("GET /1/boards/b1/actions", Resp.ok("[]"));
+        Resp[] pages = new Resp[HttpTrelloClient.MAX_PAGES];
+        for (int p = 0; p < pages.length; p++) {
+            StringBuilder body = new StringBuilder("[");
+            for (int i = 0; i < 1000; i++) {
+                body.append(i == 0 ? "" : ",").append("{\"id\":\"c").append(p * 1000 + i).append("\"}");
+            }
+            pages[p] = Resp.ok(body.append(']').toString());
+        }
+        route("GET /1/boards/b1/cards", pages);
+
+        // Cut short, the list would make the sync delete every card past the cut.
+        assertThatThrownBy(() -> client.board(KEY, TOKEN, "b1")).isInstanceOf(IOException.class)
+                .hasMessageContaining("more cards than docs0 will read");
+    }
+
+    @Test
     void pagesThroughMoreThanAThousandCardsWithBefore() throws IOException {
         route("GET /1/boards/b1", Resp.ok("{\"id\": \"b1\", \"name\": \"Big\"}"));
         route("GET /1/boards/b1/lists", Resp.ok("[]"));

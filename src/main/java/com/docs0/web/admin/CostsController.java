@@ -51,6 +51,7 @@ public class CostsController {
         BigDecimal other = budget.otherSpentThisMonth(tenantId);
         BigDecimal cap = budget.monthlyCap(admin.tenantId());
         int percent = cap == null ? 0
+                : cap.signum() == 0 ? 100
                 : spent.multiply(BigDecimal.valueOf(100)).divide(cap, 0, java.math.RoundingMode.DOWN)
                         .min(BigDecimal.valueOf(100)).intValue();
 

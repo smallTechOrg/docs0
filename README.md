@@ -7,10 +7,15 @@ docs0 does not use vector search or embeddings. Claude searches a keyword index,
 whole documents, and answers only from what it read. Every quote in an answer is checked
 against the source document before it is shown.
 
-**Status:** Phase 6 — answers from Google Drive, Linear, Trello, Grain, Slack history and Gmail
+**Status:** all phases are built (0 scaffold, 1 Drive answers, 2 feedback and corrections, 3 Linear and Trello,
+4 Grain, Slack history and audience-aware access, 5 Gmail, 6 repeat-question answers, stale flags and Insights,
+7 multi-company onboarding). It answers from Google Drive, Linear, Trello, Grain, Slack history and Gmail
 (each mailbox private to its owner), can file a Linear issue or Trello card when asked (after the
 asker confirms), answers repeat questions in channels you opt in, flags answers that lean on old
 documents, and reports what people ask (Insights, weekly digest). See [spec/roadmap.md](spec/roadmap.md).
+The tests use fakes for every network edge, so these need real credentials to verify: Slack (events, scopes,
+`conversations.info` replies, Add to Slack and Sign in with Slack), Anthropic, Google Drive and Gmail
+(domain-wide delegation), Linear, Trello and Grain. The live checks under `src/test/java/com/docs0/live` do that.
 
 ## What you need
 
@@ -44,7 +49,9 @@ cost of the month's answers reaches it.
 4. Invite the bot to the channels where the team will use it: `/invite @docs0`.
 
 If you created the app before feedback existed, paste the manifest again (*App Manifest*
-in the app settings) so the app also subscribes to `reaction_removed`.
+in the app settings) so the app also subscribes to `reaction_removed`, `app_uninstalled` and `tokens_revoked`.
+The manifest no longer asks for the `im:read` scope (docs0 knows a direct message from the event itself), so an
+app that still has it can keep it or drop it.
 
 docs0 connects out to Slack over Socket Mode, so it needs no public URL. (To serve several companies instead,
 see [Running docs0 for several companies](#running-docs0-for-several-companies).)
@@ -163,8 +170,11 @@ at all: it only ever asks Slack for the channels you ticked.
 **How private channels are protected.** Public channels are shared knowledge. A private channel
 can be ticked once docs0 has been invited to it (`/invite @docs0` in that channel), and its
 messages are then **restricted**: docs0 only uses them in an answer when *everyone who will see
-that answer* is a member of that private channel. In a channel, that is every member of the
-channel docs0 is answering in; in a direct message it is the one person. If even one person is
+that answer* is a member of that private channel. Restricted documents are used only in direct messages
+(the one person) and in private channels (every member of that channel); a **public channel** can be read by
+anyone in the workspace, so it only ever gets shared knowledge, and so does any channel whose privacy Slack
+cannot tell docs0 (docs0 asks Slack with `conversations.info`, which the existing `channels:read`,
+`groups:read` and `mpim:read` scopes cover, and remembers the answer for a few minutes). If even one person is
 outside the private channel, the messages are invisible to the answer: not quoted, not cited,
 not even hinted at. Bots and deactivated users are not counted as people. Membership is
 re-read on every sync, so someone who leaves a private channel stops being covered at the next
@@ -281,9 +291,11 @@ that Slack did not accept the message.
 ./mvnw spring-boot:run
 ```
 
-Open <http://localhost:8080> for the status page: connection state for Slack, Anthropic,
-Drive, Linear and Trello, the document count, the last sync and this month's spend, with a link to the
-Sources page. `/health` returns the same as JSON. The app starts even when a credential is missing; the status page says
+Open <http://localhost:8080> for the status page: connection state for the Database, Slack, Anthropic,
+Google Drive, Gmail, Linear, Trello, Grain and Slack history, the document count, the last sync and this month's spend, with a link to the
+Sources page. `/health` returns the same as JSON. Without `DOCS0_ADMIN_PASSWORD` the admin pages are served
+only to requests from this machine **for a `localhost`, `127.0.0.1` or `[::1]` host name** (any other `Host`
+gets 403); set `DOCS0_ADMIN_PASSWORD` if you reach docs0 by another name or through a proxy. The app starts even when a credential is missing; the status page says
 what is not set up.
 
 ### Multiple companies
@@ -321,12 +333,18 @@ own docs, run it as a distributed Slack app:
 5. **Signing in.** Admins click **Sign in** (`/admin/login`) and use Sign in with Slack. They can enter their own
    company only, if their email is on that company's admin list or Slack says they are a workspace admin or owner.
    The **Start** page (`/admin/start`) is a checklist for the company (Slack connected, add knowledge, invite
-   docs0 to channels, try it) and where admins manage that list (up to 20 emails). Sessions last 8 hours idle.
+   docs0 to channels, try it) and where admins manage that list (up to 20 emails). A session ends after 8 hours idle or 12 hours after sign-in, and is checked again against the admin list and
+   Slack at most every 5 minutes: an admin who is removed from the list (or stops being a workspace admin) loses
+   access within about 5 minutes. If Slack cannot be reached the last good answer holds for 15 more minutes,
+   then the session ends. Install and sign-in pages allow 30 requests a minute per address.
    In this mode the "local machine only" shortcut for `/admin` is off; the operator can still reach the admin
    pages for the configured tenant with `DOCS0_ADMIN_PASSWORD` over HTTP Basic.
-6. **Budget per company.** Every company uses `DOCS0_MONTHLY_BUDGET_USD` unless it has its own cap. For now the
-   operator sets that in the database, in USD: `UPDATE tenant SET monthly_budget_usd = 25 WHERE slug = 'acme';`
-   (`NULL` goes back to the default). To suspend a company: `UPDATE tenant SET status = 'SUSPENDED' WHERE slug = ...`
+6. **Budget per company.** A company that installs itself starts with its own cap of `DOCS0_NEW_TENANT_BUDGET_USD`
+   (default 5 USD a month, so a new install is never unmetered); the pilot company, created from
+   `DOCS0_TENANT_SLUG`, uses the global `DOCS0_MONTHLY_BUDGET_USD`. A company's own cap in the database wins:
+   `NULL` means "use `DOCS0_MONTHLY_BUDGET_USD`", any number is the cap in USD, and **`0` means no budget at all,
+   every question is refused**. The operator raises a company's cap in the database:
+   `UPDATE tenant SET monthly_budget_usd = 25 WHERE slug = 'acme';` (`NULL` goes back to the default). To suspend a company: `UPDATE tenant SET status = 'SUSPENDED' WHERE slug = ...`
    (its admins can still sign in but only see a "suspended" page; set `'ACTIVE'` to lift it).
 7. **Google Drive caveat.** All companies connect Google Drive through the one Google OAuth client you configured
    (`DOCS0_GOOGLE_OAUTH_CLIENT_ID`). For other companies' admins to sign in with it, that client must be set up as
@@ -400,7 +418,8 @@ it says so, asks a clarifying question, or names who might know.
 ./mvnw verify
 ```
 
-Tests run against the real `docs0_test` Postgres database. They never use real Slack,
+Tests run against the real `docs0_test` Postgres database on localhost (set `DOCS0_TEST_DATABASE_URL` to use
+another database or host; it defaults to `jdbc:postgresql://localhost:5432/docs0_test`). They never use real Slack,
 Drive or Anthropic credentials. `com.docs0.isolation` holds the two-company tests that prove one company
 never sees or changes the other's data.
 

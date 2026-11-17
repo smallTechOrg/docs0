@@ -26,6 +26,12 @@ public interface SlackMessenger {
     /** The name people see for a user: display name, else real name, else the user name. */
     String userDisplayName(String userId);
 
+    /** Who can read a channel: everyone in the workspace (PUBLIC) or only its members (PRIVATE: private channel, DM, group DM). */
+    enum ChannelPrivacy { PUBLIC, PRIVATE }
+
+    /** Whether a channel is private (conversations.info: is_private, is_im or is_mpim). Throws when Slack cannot say. */
+    ChannelPrivacy channelPrivacy(String channel);
+
     /** docs0's own Slack user id. */
     String botUserId();
 

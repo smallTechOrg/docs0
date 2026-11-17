@@ -53,7 +53,7 @@ class CorrectionFlowTest {
         InteractionRepository interactions = new InteractionRepository(jdbc);
         FeedbackRepository feedback = new FeedbackRepository(jdbc);
         CorrectionFlow flow = new CorrectionFlow(new CorrectionDetector(llm, props), conversations, interactions,
-                feedback, new CorrectionRepository(jdbc), slack);
+                feedback, new CorrectionRepository(jdbc), slack, tenants, new BudgetService(jdbc, props));
         handler = new QuestionHandler(tenants, agent, new FakeKnowledge(), new BudgetService(jdbc, props),
                 conversations, interactions, slack, flow, new com.docs0.action.PendingActionRepository(jdbc),
                 new IdentityService(jdbc, slack), Duration.ZERO);
@@ -115,6 +115,48 @@ class CorrectionFlowTest {
         long clearedPrompts = jdbc.sql("SELECT count(*) FROM feedback_prompt WHERE cleared_at IS NOT NULL")
                 .query(Long.class).single();
         assertThat(clearedPrompts).isEqualTo(1);
+    }
+
+    @Test
+    void aSuspendedCompanyGetsNoModelCallNoStoredCorrectionAndNoThanks() throws Exception {
+        answeredThread();
+        thumbsDown();
+        int posts = slack.posts.size();
+        new TenantService(jdbc).suspend(tenantId);
+
+        await(reply("it's 14 dollars", "100.5", "Ev1"));
+
+        assertThat(llm.asked).isEmpty();
+        assertThat(corrections()).isEmpty();
+        assertThat(slack.posts.subList(posts, slack.posts.size())).extracting(FakeMessenger.Posted::text)
+                .containsExactly(QuestionHandler.SUSPENDED);
+    }
+
+    @Test
+    void aCompanyWhoseBudgetIsUsedUpGetsNoModelCallForACorrectionEither() throws Exception {
+        answeredThread();
+        thumbsDown();
+        new TenantService(jdbc).setMonthlyBudget(tenantId, BigDecimal.ZERO);
+
+        await(reply("it's 14 dollars", "100.5", "Ev1"));
+
+        assertThat(llm.asked).isEmpty();
+        assertThat(corrections()).isEmpty();
+        assertThat(slack.posts.get(slack.posts.size() - 1).text()).isEqualTo(QuestionHandler.OVER_BUDGET);
+    }
+
+    @Test
+    void aLongReplyIsCutToAThousandCharactersBeforeTheModelSeesIt() throws Exception {
+        answeredThread();
+        thumbsDown();
+        llm.fact = "The Team plan costs $14.";
+
+        await(reply("that's wrong " + "z".repeat(3000), "100.5", "Ev1"));
+
+        assertThat(llm.asked).singleElement().satisfies(a -> {
+            assertThat(a).contains("<reply>that's wrong zzz").doesNotContain("z".repeat(1000));
+            assertThat(a.substring(a.indexOf("<reply>") + 7, a.indexOf("</reply>"))).hasSize(CorrectionFlow.MAX_REPLY_CHARS);
+        });
     }
 
     @Test

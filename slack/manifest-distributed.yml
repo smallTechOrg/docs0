@@ -35,7 +35,6 @@ oauth_config:
       - mpim:history
       - channels:read
       - groups:read
-      - im:read
       - im:write
       - mpim:read
       - users:read
@@ -53,6 +52,8 @@ settings:
       - message.mpim
       - reaction_added
       - reaction_removed
+      - app_uninstalled
+      - tokens_revoked
   interactivity:
     is_enabled: true
     request_url: https://YOUR-DOMAIN/slack/interactions

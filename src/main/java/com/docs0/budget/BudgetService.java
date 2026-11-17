@@ -2,8 +2,10 @@ package com.docs0.budget;
 
 import com.docs0.config.Docs0Properties;
 import java.math.BigDecimal;
+import java.time.Clock;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Service;
 
@@ -13,10 +15,17 @@ public class BudgetService {
 
     private final JdbcClient jdbc;
     private final Docs0Properties props;
+    private final Clock clock;
 
-    public BudgetService(JdbcClient jdbc, Docs0Properties props) {
+    @Autowired
+    public BudgetService(JdbcClient jdbc, Docs0Properties props, Clock clock) {
         this.jdbc = jdbc;
         this.props = props;
+        this.clock = clock;
+    }
+
+    public BudgetService(JdbcClient jdbc, Docs0Properties props) {
+        this(jdbc, props, Clock.systemUTC());
     }
 
     /** Spend so far in the current calendar month (UTC), in USD: questions plus the other model calls. */
@@ -48,13 +57,14 @@ public class BudgetService {
                 .single();
     }
 
-    private static java.time.OffsetDateTime monthStart() {
-        return LocalDate.now(ZoneOffset.UTC).withDayOfMonth(1).atStartOfDay().atOffset(ZoneOffset.UTC);
+    private java.time.OffsetDateTime monthStart() {
+        return LocalDate.now(clock.withZone(ZoneOffset.UTC)).withDayOfMonth(1).atStartOfDay().atOffset(ZoneOffset.UTC);
     }
 
     /**
-     * The tenant's monthly cap in USD, or null when uncapped: the tenant's own limit when it has a positive one,
-     * otherwise the global default ({@code DOCS0_MONTHLY_BUDGET_USD}).
+     * The tenant's monthly cap in USD, or null when uncapped: the tenant's own limit when it has one (0 means no
+     * budget at all: every question is refused), otherwise (no own limit, null) the global default
+     * ({@code DOCS0_MONTHLY_BUDGET_USD}).
      */
     public BigDecimal monthlyCap(long tenantId) {
         BigDecimal own = jdbc.sql("SELECT monthly_budget_usd FROM tenant WHERE id = :tenantId")
@@ -62,7 +72,7 @@ public class BudgetService {
                 .query(BigDecimal.class)
                 .optional()
                 .orElse(null);
-        if (own != null && own.signum() > 0) {
+        if (own != null && own.signum() >= 0) {
             return own;
         }
         return props.budget().capped() ? props.budget().monthlyUsd() : null;

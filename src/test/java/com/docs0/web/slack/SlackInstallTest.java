@@ -5,6 +5,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 
 import com.docs0.slack.FakeSlackOAuth;
+import com.docs0.slack.SlackInstaller;
 import com.docs0.slack.SlackOAuth.Installed;
 import com.docs0.slack.SlackSignature;
 import com.docs0.tenant.Tenant;
@@ -149,6 +150,79 @@ class SlackInstallTest extends MultiTenantTest {
         assertThat(workspaces.botToken(created.id())).contains(FakeSlackOAuth.BOT_TOKEN);
         assertThat(html).doesNotContain(FakeSlackOAuth.BOT_TOKEN);
         assertThat(output.getAll()).doesNotContain(FakeSlackOAuth.BOT_TOKEN).doesNotContain("ina@acme.example");
+    }
+
+    @Test
+    void anAddressThatAsksTooOftenGetsTooManyRequestsAndOthersAreNotAffected() throws Exception {
+        for (int i = 0; i < 30; i++) {
+            assertThat(mvc.perform(get("/slack/install").with(from("203.0.113.5"))).andReturn().getResponse().getStatus())
+                    .as("request %d", i + 1).isEqualTo(302);
+        }
+        MvcResult blocked = mvc.perform(get("/slack/install").with(from("203.0.113.5"))).andReturn();
+        assertThat(blocked.getResponse().getStatus()).isEqualTo(429);
+        assertThat(blocked.getRequest().getSession(false)).isNull(); // a refused request starts no flow, so no session
+        // The same budget covers the sign-in page and the callbacks; another address has its own.
+        assertThat(mvc.perform(get("/admin/login").with(from("203.0.113.5"))).andReturn().getResponse().getStatus())
+                .isEqualTo(429);
+        assertThat(mvc.perform(get("/slack/oauth/callback").with(from("203.0.113.5"))).andReturn().getResponse().getStatus())
+                .isEqualTo(429);
+        assertThat(mvc.perform(get("/slack/install").with(from("203.0.113.6"))).andReturn().getResponse().getStatus())
+                .isEqualTo(302);
+        // A minute later the address may try again.
+        clock.advance(Duration.ofSeconds(61));
+        assertThat(mvc.perform(get("/slack/install").with(from("203.0.113.5"))).andReturn().getResponse().getStatus())
+                .isEqualTo(302);
+    }
+
+    @Test
+    void theForwardedAddressCountsOnlyWhenTheConnectionComesFromThisMachine() throws Exception {
+        // From the machine itself (a proxy): each forwarded client has its own budget.
+        for (int i = 0; i < 30; i++) {
+            mvc.perform(get("/slack/install").with(from("127.0.0.1")).header("X-Forwarded-For", "198.51.100.1"));
+        }
+        assertThat(mvc.perform(get("/slack/install").with(from("127.0.0.1")).header("X-Forwarded-For", "198.51.100.1"))
+                .andReturn().getResponse().getStatus()).isEqualTo(429);
+        assertThat(mvc.perform(get("/slack/install").with(from("127.0.0.1")).header("X-Forwarded-For", "198.51.100.2"))
+                .andReturn().getResponse().getStatus()).isEqualTo(302);
+
+        // From anywhere else the header is ignored, so it cannot be used to dodge the limit.
+        for (int i = 0; i < 30; i++) {
+            mvc.perform(get("/slack/install").with(from("203.0.113.7")).header("X-Forwarded-For", "10.0.0." + i));
+        }
+        assertThat(mvc.perform(get("/slack/install").with(from("203.0.113.7")).header("X-Forwarded-For", "10.9.9.9"))
+                .andReturn().getResponse().getStatus()).isEqualTo(429);
+    }
+
+    private static org.springframework.test.web.servlet.request.RequestPostProcessor from(String address) {
+        return r -> {
+            r.setRemoteAddr(address);
+            return r;
+        };
+    }
+
+    @Test
+    void aNewCompanyStartsWithTheNewTenantCapAndAReinstallLeavesAnOperatorsChangeAlone() throws Exception {
+        assertThat(install().getResponse().getStatus()).isEqualTo(200);
+        Tenant acme = tenants.findBySlackTeamId("T_ACME").orElseThrow();
+
+        // The setting is blank in tests, so the built-in 5 USD applies: never unmetered.
+        assertThat(acme.monthlyBudgetUsd()).isEqualByComparingTo("5");
+        // The pilot company, created from configuration, keeps using the global default.
+        assertThat(tenants.ensure("pilot", "Pilot").monthlyBudgetUsd()).isNull();
+
+        tenants.setMonthlyBudget(acme.id(), new java.math.BigDecimal("50"));
+        assertThat(install().getResponse().getStatus()).isEqualTo(200);
+        assertThat(tenants.findBySlackTeamId("T_ACME").orElseThrow().monthlyBudgetUsd()).isEqualByComparingTo("50");
+    }
+
+    @Test
+    void theNewTenantCapSettingIsBlankSafeAndNeverUnmetered() {
+        assertThat(SlackInstaller.parseBudget(null)).isEqualByComparingTo("5");
+        assertThat(SlackInstaller.parseBudget("  ")).isEqualByComparingTo("5");
+        assertThat(SlackInstaller.parseBudget("abc")).isEqualByComparingTo("5");
+        assertThat(SlackInstaller.parseBudget("-3")).isEqualByComparingTo("5");
+        assertThat(SlackInstaller.parseBudget("12.50")).isEqualByComparingTo("12.50");
+        assertThat(SlackInstaller.parseBudget("0")).isEqualByComparingTo("0");
     }
 
     @Test

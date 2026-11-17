@@ -48,6 +48,7 @@ public abstract class MultiTenantTest extends IntegrationTest {
     @Autowired protected MutableClock clock;
     @Autowired protected SlackInstaller installer;
     @Autowired protected SlackWorkspaces workspaces;
+    @Autowired protected com.docs0.web.IpRateLimiter limiter;
 
     @BeforeEach
     void resetFakes() {
@@ -55,6 +56,7 @@ public abstract class MultiTenantTest extends IntegrationTest {
         signIn.reset();
         slack.reset();
         clock.reset();
+        limiter.reset();
     }
 
     /** The value of a query parameter of a redirect. */

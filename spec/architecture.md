@@ -5,13 +5,13 @@
 | Layer | Choice | Rationale |
 |---|---|---|
 | Language | Java 25 | Binding user requirement (Java). 25 is the JDK installed on the build machine. |
-| Framework | Spring Boot 4.1 (Web MVC, JDBC, Scheduling, Actuator) | Assumed: the mainstream Java service framework; gives config, scheduling, health and a web layer for the dashboard in one process. |
+| Framework | Spring Boot 4.1 (Web MVC, JDBC, Scheduling) | Assumed: the mainstream Java service framework; gives config, scheduling, health and a web layer for the dashboard in one process. |
 | Build | Maven via the checked-in wrapper `./mvnw` | No global build tool needed; the wrapper pins the version. |
 | Database | PostgreSQL 14+ | One store for content, the keyword index, conversations and corrections. Full-text search (`tsvector` + GIN) is the retrieval index. No vector extension. |
 | Migrations | Flyway (`src/main/resources/db/migration`) | Schema changes are versioned and verifiable. |
 | Data access | Spring `JdbcClient` with hand-written SQL | Full-text queries and tenant scoping are explicit; no ORM. |
 | LLM | Anthropic via `com.anthropic:anthropic-java`, model `claude-sonnet-5-5` (env-overridable) | User chose Anthropic and Sonnet 5.5 for cost. |
-| Slack | Bolt for Java, Socket Mode | User chose Socket Mode: no public URL while piloting. |
+| Slack | Bolt for Java: Socket Mode for the single-company pilot, HTTP events (own signature-verified controller) for the distributed app | User chose Socket Mode: no public URL while piloting; the distributed app needs HTTPS events. |
 | Google Drive | `google-api-services-drive` v3 with the admin's own Google sign-in (OAuth 2.0 authorization-code flow, offline access, `drive.readonly`) | User decision: no service account; Drive is connected from the dashboard. |
 | Text extraction | Drive export for Google Docs/Sheets/Slides; Apache PDFBox for PDFs | Whole-document plain text is what the agent reads. |
 | Web UI | Server-rendered HTML (Thymeleaf) served by the same app | The dashboard is small; no separate front-end build. |

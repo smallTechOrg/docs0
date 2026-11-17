@@ -33,6 +33,7 @@ public final class AnswerVerifier {
     /** A marker such as [2] or [1, 3], or a run of them such as [1][3], handled as one unit. */
     private static final String ONE_MARKER = "\\[\\d{1,4}(?:\\s*,\\s*\\d{1,4})*]";
     private static final Pattern MARKER = Pattern.compile(ONE_MARKER + "(?:[ \\t]*" + ONE_MARKER + ")*");
+    private static final Pattern ONE = Pattern.compile(ONE_MARKER);
     private static final Pattern NUMBER = Pattern.compile("\\d+");
     private static final Pattern WHITESPACE = Pattern.compile("[\\s\\u00A0\\u2007\\u202F]+");
 
@@ -84,9 +85,21 @@ public final class AnswerVerifier {
             }
         }
 
+        // A citation of the same document with the same quote as an earlier one is that earlier citation.
+        int[] alias = new int[submitted.size()];
+        Map<String, Integer> firstOf = new HashMap<>();
+        for (int i = 0; i < alias.length; i++) {
+            alias[i] = i;
+            if (valid[i] != null) {
+                String key = valid[i].id() + "|" + normalise(submitted.get(i).quote());
+                int self = i;
+                alias[i] = firstOf.computeIfAbsent(key, k -> self);
+            }
+        }
+
         int[] newIndex = new int[submitted.size()];
         int[] next = {1};
-        String answer = rewriteMarkers(draft.answer() == null ? "" : draft.answer(), valid, newIndex, next);
+        String answer = rewriteMarkers(draft.answer() == null ? "" : draft.answer(), valid, alias, newIndex, next);
 
         // Valid citations the text never referenced keep their place after the referenced ones.
         List<Citation> citations = new ArrayList<>();
@@ -94,6 +107,9 @@ public final class AnswerVerifier {
         for (int i = 0; i < submitted.size(); i++) {
             if (valid[i] == null) {
                 dropped++;
+                continue;
+            }
+            if (alias[i] != i) {
                 continue;
             }
             if (newIndex[i] == 0) {
@@ -160,7 +176,7 @@ public final class AnswerVerifier {
      * Renumbers markers of valid citations 1..n in order of first appearance and removes the
      * rest, together with the space in front of them so no gap is left behind.
      */
-    private static String rewriteMarkers(String text, Document[] valid, int[] newIndex, int[] next) {
+    private static String rewriteMarkers(String text, Document[] valid, int[] alias, int[] newIndex, int[] next) {
         StringBuilder out = new StringBuilder();
         Matcher matcher = MARKER.matcher(text);
         int position = 0;
@@ -169,23 +185,50 @@ public final class AnswerVerifier {
             appendSegment(out, text.substring(position, matcher.start()), skipLeadingSpace);
             position = matcher.end();
 
+            // Only a bracket that can be a citation is one: a number from 1 to the count of submitted citations,
+            // not the text of a markdown link. Anything else ([2024], [x](url)) stays as written.
+            boolean linkText = matcher.end() < text.length() && text.charAt(matcher.end()) == '(';
             Set<Integer> kept = new LinkedHashSet<>();
-            Matcher numbers = NUMBER.matcher(matcher.group());
-            while (numbers.find()) {
-                int number = Integer.parseInt(numbers.group());
-                if (number >= 1 && number <= valid.length && valid[number - 1] != null) {
-                    if (newIndex[number - 1] == 0) {
-                        newIndex[number - 1] = next[0]++;
+            StringBuilder literal = new StringBuilder();
+            boolean anyCitation = false;
+            Matcher brackets = ONE.matcher(matcher.group());
+            while (brackets.find()) {
+                String bracket = brackets.group();
+                boolean last = brackets.end() == matcher.group().length();
+                List<Integer> numbers = new ArrayList<>();
+                Matcher digits = NUMBER.matcher(bracket);
+                while (digits.find()) {
+                    numbers.add(Integer.parseInt(digits.group()));
+                }
+                boolean citation = !(last && linkText)
+                        && numbers.stream().allMatch(n -> n >= 1 && n <= valid.length);
+                if (!citation) {
+                    literal.append(bracket);
+                    continue;
+                }
+                anyCitation = true;
+                for (int number : numbers) {
+                    int target = alias[number - 1];
+                    if (valid[target] != null) {
+                        if (newIndex[target] == 0) {
+                            newIndex[target] = next[0]++;
+                        }
+                        kept.add(newIndex[target]);
                     }
-                    kept.add(newIndex[number - 1]);
                 }
             }
-            if (kept.isEmpty()) {
+            if (!anyCitation) {
+                out.append(matcher.group());
+                skipLeadingSpace = false;
+                continue;
+            }
+            if (kept.isEmpty() && literal.isEmpty()) {
                 trimTrailingBlanks(out);
                 // At the start of a line there is nothing to attach the following space to.
                 skipLeadingSpace = out.isEmpty() || out.charAt(out.length() - 1) == '\n';
             } else {
                 kept.forEach(n -> out.append('[').append(n).append(']'));
+                out.append(literal);
                 skipLeadingSpace = false;
             }
         }

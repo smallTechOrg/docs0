@@ -5,11 +5,13 @@ import com.docs0.crypto.TokenCipher;
 import com.docs0.tenant.AdminEmails;
 import com.docs0.tenant.Tenant;
 import com.docs0.tenant.TenantService;
+import java.math.BigDecimal;
 import java.text.Normalizer;
 import java.util.Locale;
 import java.util.Optional;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -31,14 +33,30 @@ public class SlackInstaller {
     private final SlackMessengers messengers;
     private final TokenCipher cipher;
     private final Docs0Properties props;
+    private final BigDecimal newTenantBudget;
 
+    /** {@code newTenantBudget} is DOCS0_NEW_TENANT_BUDGET_USD: the monthly cap of a company that installs itself. */
     public SlackInstaller(TenantService tenants, SlackWorkspaces workspaces, SlackMessengers messengers,
-            TokenCipher cipher, Docs0Properties props) {
+            TokenCipher cipher, Docs0Properties props,
+            @Value("${docs0.new-tenant-budget-usd:}") String newTenantBudget) {
+        this.newTenantBudget = parseBudget(newTenantBudget);
         this.tenants = tenants;
         this.workspaces = workspaces;
         this.messengers = messengers;
         this.cipher = cipher;
         this.props = props;
+    }
+
+    static final BigDecimal DEFAULT_NEW_TENANT_BUDGET = new BigDecimal("5");
+
+    /** The cap for a new company: the setting when it is a number of 0 or more, otherwise 5 USD. Never unmetered. */
+    public static BigDecimal parseBudget(String value) {
+        try {
+            BigDecimal usd = value == null || value.isBlank() ? null : new BigDecimal(value.strip());
+            return usd == null || usd.signum() < 0 ? DEFAULT_NEW_TENANT_BUDGET : usd;
+        } catch (NumberFormatException e) {
+            return DEFAULT_NEW_TENANT_BUDGET;
+        }
     }
 
     /** False when bot tokens cannot be stored (no DOCS0_ENCRYPTION_KEY): installing would lose the token. */
@@ -103,7 +121,7 @@ public class SlackInstaller {
             if (tenants.findBySlug(candidate).isPresent()) {
                 continue;
             }
-            return tenants.create(candidate, name);
+            return tenants.create(candidate, name, newTenantBudget);
         }
         throw new IllegalStateException("No free name for the new company");
     }

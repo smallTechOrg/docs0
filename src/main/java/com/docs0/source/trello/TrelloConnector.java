@@ -6,6 +6,7 @@ import com.docs0.source.Source;
 import com.docs0.source.SourceAccessException;
 import com.docs0.source.SourceConnector;
 import com.docs0.source.SourceCredential;
+import com.docs0.source.StatusText;
 import com.docs0.source.SyncCounts;
 import com.docs0.source.SyncRun;
 import com.docs0.source.SyncRunRepository;
@@ -37,7 +38,6 @@ public class TrelloConnector implements SourceConnector, StatusContributor {
     public static final String NAME = TrelloConnection.NAME;
 
     private static final Logger log = LoggerFactory.getLogger(TrelloConnector.class);
-    private static final int MAX_STATUS_ERROR_CHARS = 120;
 
     private final TrelloClient client;
     private final TrelloConnection connection;
@@ -169,7 +169,7 @@ public class TrelloConnector implements SourceConnector, StatusContributor {
         }
         SyncRun run = last.get();
         if (SyncRun.FAILED.equals(run.status())) {
-            return ComponentStatus.down(NAME, "last sync failed: " + shorten(run.error()));
+            return ComponentStatus.down(NAME, "last sync failed: " + StatusText.shorten(run.error()));
         }
         long count = documents.count(tenantId, sourceId);
         if (SyncRun.RUNNING.equals(run.status())) {
@@ -177,13 +177,5 @@ public class TrelloConnector implements SourceConnector, StatusContributor {
         }
         return ComponentStatus.up(NAME, count + " documents, last sync "
                 + run.finishedAt().truncatedTo(ChronoUnit.SECONDS));
-    }
-
-    private static String shorten(String error) {
-        if (error == null || error.isBlank()) {
-            return "unknown error";
-        }
-        String oneLine = error.replaceAll("\\s+", " ").trim();
-        return oneLine.length() > MAX_STATUS_ERROR_CHARS ? oneLine.substring(0, MAX_STATUS_ERROR_CHARS) + "..." : oneLine;
     }
 }

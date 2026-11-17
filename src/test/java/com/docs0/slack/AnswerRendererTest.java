@@ -143,7 +143,7 @@ class AnswerRendererTest {
                 1. numbered stays
                 ~~old~~ new""";
 
-        assertThat(AnswerRenderer.toMrkdwn(markdown)).isEqualTo("""
+        assertThat(AnswerRenderer.toMrkdwn(markdown, java.util.Set.of("docs.example"))).isEqualTo("""
                 *Pricing overview*
                 The plan is *$10 per seat*, see <https://docs.example/pricing?a=1&b=2|the pricing doc>.
 
@@ -156,11 +156,39 @@ class AnswerRendererTest {
     }
 
     @Test
+    void anAnswerOnlyLinksToTheCitedDocumentsHostsAndSlack() {
+        String text = "Read [the pricing doc](https://docs.example/pricing), [Slack help](https://my.slack.com/help), "
+                + "[a phish](https://evil.example/login), <https://evil.example/x|slack.com>, <http://docs.example/plain|plain http>, "
+                + "<https://slack.com.evil.example/a> and [x](https://docs.example@evil.example/).";
+        AnswerRenderer.Rendered rendered = AnswerRenderer.render(result(Kind.ANSWER, text, Confidence.HIGH,
+                List.of(new Citation(1, 7, "Pricing 2026", "https://docs.example/pricing", "Each seat costs $10.")),
+                List.of(), List.of()));
+
+        String answer = sectionTexts(rendered).get(0);
+        assertThat(answer).contains("<https://docs.example/pricing|the pricing doc>")
+                .contains("<https://my.slack.com/help|Slack help>");
+        // Anything else is plain code text: no link to click, nothing Slack can turn into one.
+        assertThat(answer).contains("a phish (`https://evil.example/login`)")
+                .contains("slack.com (`https://evil.example/x`)")
+                .contains("plain http (`http://docs.example/plain`)")
+                .contains("`https://slack.com.evil.example/a`")
+                .contains("x (`https://docs.example@evil.example/`)");
+        assertThat(answer).doesNotContain("<https://evil").doesNotContain("<http://").doesNotContain("evil.example|");
+    }
+
+    @Test
+    void withoutCitationsNoLinkOfTheModelsOwnSurvives() {
+        assertThat(AnswerRenderer.toMrkdwn("See [docs](https://docs.example/a)."))
+                .isEqualTo("See docs (`https://docs.example/a`).");
+    }
+
+    @Test
     void escapesSlackControlCharactersInPlainText() {
         assertThat(AnswerRenderer.toMrkdwn("R&D says a < b > c, ping <!channel> and <@U123>"))
                 .isEqualTo("R&amp;D says a &lt; b &gt; c, ping &lt;!channel&gt; and &lt;@U123&gt;");
         // Already-escaped entities, existing Slack links and quote lines survive.
-        assertThat(AnswerRenderer.toMrkdwn("Q&amp;A at <https://x.example/a|the *site*>\n> quoted **line**"))
+        assertThat(AnswerRenderer.toMrkdwn("Q&amp;A at <https://x.example/a|the *site*>\n> quoted **line**",
+                java.util.Set.of("x.example")))
                 .isEqualTo("Q&amp;A at <https://x.example/a|the *site*>\n> quoted *line*");
         assertThat(AnswerRenderer.toMrkdwn("```java\nif (a < b) {}\n```")).isEqualTo("```\nif (a &lt; b) {}\n```");
         assertThat(AnswerRenderer.toMrkdwn(null)).isEmpty();

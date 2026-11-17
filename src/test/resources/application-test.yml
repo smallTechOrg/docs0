@@ -19,6 +19,7 @@ docs0:
     max-steps: 12
   budget:
     monthly-usd: 100
+  new-tenant-budget-usd: ""
   slack:
     bot-token: ""
     app-token: ""

@@ -65,4 +65,46 @@ class UsageLogBudgetTest {
         assertThat(new CostReport(jdbc).otherSpend(tenant, 30)).isEqualByComparingTo("0");
         assertThat(new CostReport(jdbc).otherSpend(tenant, 90)).isEqualByComparingTo("9.00");
     }
+
+    private BudgetService budgetAt(String cap, String now) {
+        return new BudgetService(jdbc, new Docs0Properties(new Docs0Properties.Tenant("smalltech", "smallTech"), null,
+                new Docs0Properties.Budget(new BigDecimal(cap)), null, null, null, "", "", ""),
+                java.time.Clock.fixed(Instant.parse(now), java.time.ZoneOffset.UTC));
+    }
+
+    @Test
+    void theMonthBeginsAtMidnightUtcOfTheFirstByTheInjectedClock() {
+        Conversation c = TestData.conversation(jdbc, tenant, "C1", "1.1", false);
+        long november = TestData.interaction(jdbc, c, "U1", "q?", "a", "9.1", "0.60");
+        TestData.backdate(jdbc, november, Instant.parse("2026-11-30T23:59:00Z"));
+        usage.record(tenant, UsageLog.THEMES, 1, 1, new BigDecimal("0.30"));
+        jdbc.sql("UPDATE usage_log SET created_at = :t").param("t", java.sql.Timestamp.from(Instant.parse("2026-12-01T00:00:00Z"))).update();
+
+        // Still November: only the November question counts (the December usage row is in the future).
+        BudgetService lastSecond = budgetAt("1.00", "2026-11-30T23:59:59Z");
+        assertThat(lastSecond.questionSpentThisMonth(tenant)).isEqualByComparingTo("0.60");
+        // One second later it is December: the question has dropped out, the usage row counts.
+        BudgetService firstSecond = budgetAt("1.00", "2026-12-01T00:00:00Z");
+        assertThat(firstSecond.questionSpentThisMonth(tenant)).isEqualByComparingTo("0");
+        assertThat(firstSecond.otherSpentThisMonth(tenant)).isEqualByComparingTo("0.30");
+        assertThat(firstSecond.exhausted(tenant)).isFalse();
+    }
+
+    @Test
+    void aTenantCapOfZeroRefusesEverythingAndNullMeansTheGlobalDefault() {
+        BudgetService budget = budget("100");
+        assertThat(budget.monthlyCap(tenant)).isEqualByComparingTo("100");
+        assertThat(budget.exhausted(tenant)).isFalse();
+
+        new com.docs0.tenant.TenantService(jdbc).setMonthlyBudget(tenant, BigDecimal.ZERO);
+        assertThat(budget.monthlyCap(tenant)).isEqualByComparingTo("0");
+        assertThat(budget.exhausted(tenant)).isTrue();
+
+        new com.docs0.tenant.TenantService(jdbc).setMonthlyBudget(tenant, new BigDecimal("7"));
+        assertThat(budget.monthlyCap(tenant)).isEqualByComparingTo("7");
+        assertThat(budget.exhausted(tenant)).isFalse();
+
+        new com.docs0.tenant.TenantService(jdbc).setMonthlyBudget(tenant, null);
+        assertThat(budget.monthlyCap(tenant)).isEqualByComparingTo("100");
+    }
 }

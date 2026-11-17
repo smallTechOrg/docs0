@@ -184,6 +184,12 @@ public class DigestService {
                 t.append("\n• ").append(AnswerRenderer.escape(theme.label())).append(" (about ").append(theme.count())
                         .append(")");
             }
+            long privately = themeResult.askedPrivately() + themeResult.usedPrivateSources();
+            if (privately > 0) {
+                t.append("\n_").append(privately).append(privately == 1 ? " question" : " questions")
+                        .append(" asked privately or using private sources ").append(privately == 1 ? "is" : "are")
+                        .append(" not part of the themes._");
+            }
             blocks.add(section(s -> s.text(markdownText(t.toString()))));
         }
 

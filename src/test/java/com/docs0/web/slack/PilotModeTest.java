@@ -54,6 +54,14 @@ class PilotModeTest extends IntegrationTest {
     }
 
     @Test
+    void anonymousHitsOnTheInstallAndSignInPagesCreateNoSessionOutsideMultiTenantMode() throws Exception {
+        for (String page : new String[] {"/slack/install", "/admin/login", "/slack/oauth/callback", "/admin/login/callback"}) {
+            MvcResult result = mvc.perform(get(page)).andReturn();
+            assertThat(result.getRequest().getSession(false)).as(page).isNull();
+        }
+    }
+
+    @Test
     void slackEventsRejectEverythingBecauseThereIsNoSigningSecret() throws Exception {
         assertThat(mvc.perform(post("/slack/events").contentType("application/json")
                 .content("{\"type\":\"url_verification\",\"challenge\":\"abc\"}")).andReturn().getResponse().getStatus())

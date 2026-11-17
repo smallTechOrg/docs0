@@ -185,7 +185,75 @@ class SlackSignInTest extends MultiTenantTest {
         assertThat(session.getId()).isNotEqualTo(before);
         assertThat(session.getMaxInactiveInterval()).isEqualTo(8 * 60 * 60);
         assertThat(session.getAttribute("docs0.slackAdmin"))
-                .isEqualTo(new com.docs0.web.admin.AdminPrincipal(acme.id(), "Ina"));
+                .isEqualTo(new com.docs0.web.admin.AdminPrincipal(acme.id(), "Ina", "ina@acme.example", "UINA"));
+    }
+
+    // ---- the session is checked again ----
+
+    private int status(MockHttpSession session, String page) throws Exception {
+        return mvc.perform(get(page).session(session).accept(HTML)).andReturn().getResponse().getStatus();
+    }
+
+    @Test
+    void anAdminTakenOffTheListLosesTheSessionAtTheNextCheckWithinFiveMinutes() throws Exception {
+        MockHttpSession session = signInAs("ina@acme.example", "T_ACME", "UINA");
+        tenants.setAdminEmails(acme.id(), "boss@acme.example");
+
+        // Checked at sign-in: the next five minutes are not asked again.
+        clock.advance(Duration.ofMinutes(4));
+        assertThat(status(session, "/admin/sources")).isEqualTo(200);
+
+        clock.advance(Duration.ofMinutes(2));
+        MvcResult after = mvc.perform(get("/admin/sources").session(session).accept(HTML)).andReturn();
+        assertThat(after.getResponse().getStatus()).isEqualTo(302);
+        assertThat(after.getResponse().getRedirectedUrl()).isEqualTo("/admin/login");
+        assertThat(session.isInvalid()).isTrue();
+    }
+
+    @Test
+    void aWorkspaceAdminWhoStoppedBeingOneLosesTheSessionToo() throws Exception {
+        slack.workspaceAdmins.add("UOWNER");
+        MockHttpSession session = signInAs("owner@acme.example", "T_ACME", "UOWNER");
+        assertThat(status(session, "/admin/sources")).isEqualTo(200);
+        slack.workspaceAdmins.remove("UOWNER");
+
+        clock.advance(Duration.ofMinutes(6));
+
+        assertThat(status(session, "/admin/sources")).isEqualTo(302);
+        assertThat(session.isInvalid()).isTrue();
+    }
+
+    @Test
+    void anAdminWhoStaysAnAdminKeepsTheSessionUntilTheAbsoluteTwelveHours() throws Exception {
+        MockHttpSession session = signInAs("ina@acme.example", "T_ACME", "UINA");
+
+        for (int hour = 0; hour < 11; hour++) {
+            clock.advance(Duration.ofHours(1));
+            assertThat(status(session, "/admin/sources")).as("after %d hours", hour + 1).isEqualTo(200);
+        }
+        clock.advance(Duration.ofMinutes(61));
+
+        // Still on the list and busy, but twelve hours after sign-in the session ends.
+        MvcResult after = mvc.perform(get("/admin/sources").session(session).accept(HTML)).andReturn();
+        assertThat(after.getResponse().getStatus()).isEqualTo(302);
+        assertThat(after.getResponse().getRedirectedUrl()).isEqualTo("/admin/login");
+        assertThat(session.isInvalid()).isTrue();
+    }
+
+    @Test
+    void whenSlackCannotBeReachedTheLastGoodCheckHoldsForFifteenMoreMinutesThenTheSessionEnds() throws Exception {
+        slack.workspaceAdmins.add("UOWNER");
+        MockHttpSession session = signInAs("owner@acme.example", "T_ACME", "UOWNER");
+        slack.adminCheckFails = true;
+
+        clock.advance(Duration.ofMinutes(6));
+        assertThat(status(session, "/admin/sources")).isEqualTo(200);
+        clock.advance(Duration.ofMinutes(13));
+        assertThat(status(session, "/admin/sources")).isEqualTo(200);
+
+        clock.advance(Duration.ofMinutes(2));
+        assertThat(status(session, "/admin/sources")).isEqualTo(302);
+        assertThat(session.isInvalid()).isTrue();
     }
 
     @Test

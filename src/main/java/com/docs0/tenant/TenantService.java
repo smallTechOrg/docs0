@@ -41,6 +41,17 @@ public class TenantService {
                 .single();
     }
 
+    /** A new tenant with its own monthly cap in USD (0: no budget at all; null: the global default). */
+    public Tenant create(String slug, String name, BigDecimal monthlyBudgetUsd) {
+        return jdbc.sql("INSERT INTO tenant (slug, name, monthly_budget_usd) VALUES (:slug, :name, :budget) RETURNING "
+                        + COLUMNS)
+                .param("slug", slug)
+                .param("name", name)
+                .param("budget", monthlyBudgetUsd, java.sql.Types.NUMERIC)
+                .query((rs, n) -> row(rs))
+                .single();
+    }
+
     public Optional<Tenant> findById(long id) {
         return jdbc.sql("SELECT " + COLUMNS + " FROM tenant WHERE id = :id")
                 .param("id", id).query((rs, n) -> row(rs)).optional();

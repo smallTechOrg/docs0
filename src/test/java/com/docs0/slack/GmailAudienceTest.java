@@ -82,7 +82,8 @@ class GmailAudienceTest {
         IdentityService identities = new IdentityService(jdbc, slack);
         CorrectionFlow flow = new CorrectionFlow(new CorrectionDetector(new SlackFakes.FakeLlm(), props),
                 new ConversationRepository(jdbc), new InteractionRepository(jdbc),
-                new com.docs0.feedback.FeedbackRepository(jdbc), new com.docs0.feedback.CorrectionRepository(jdbc), slack);
+                new com.docs0.feedback.FeedbackRepository(jdbc), new com.docs0.feedback.CorrectionRepository(jdbc), slack, tenants,
+                new BudgetService(jdbc, props));
         handler = new QuestionHandler(tenants, agent, new FakeKnowledge(), new BudgetService(jdbc, props),
                 new ConversationRepository(jdbc), new InteractionRepository(jdbc), slack, flow,
                 new com.docs0.action.PendingActionRepository(jdbc), identities, Duration.ZERO);

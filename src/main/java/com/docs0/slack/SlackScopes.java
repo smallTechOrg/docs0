@@ -10,12 +10,13 @@ public final class SlackScopes {
 
     /** Bot token scopes. */
     public static final List<String> BOT = List.of("app_mentions:read", "chat:write", "channels:history",
-            "groups:history", "im:history", "mpim:history", "channels:read", "groups:read", "im:read", "im:write",
+            "groups:history", "im:history", "mpim:history", "channels:read", "groups:read", "im:write",
             "mpim:read", "users:read", "users:read.email", "channels:join", "reactions:read");
 
     /** Events the app subscribes to. */
     public static final List<String> BOT_EVENTS = List.of("app_mention", "message.channels", "message.groups",
-            "message.im", "message.mpim", "reaction_added", "reaction_removed");
+            "message.im", "message.mpim", "reaction_added", "reaction_removed", "app_uninstalled",
+            "tokens_revoked");
 
     /** Sign in with Slack (OpenID Connect) scopes. */
     public static final List<String> SIGN_IN = List.of("openid", "email", "profile");

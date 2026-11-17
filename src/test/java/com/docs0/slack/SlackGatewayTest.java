@@ -64,6 +64,7 @@ class SlackGatewayTest {
         try (var context = new org.springframework.context.annotation.AnnotationConfigApplicationContext()) {
             context.registerBean(org.springframework.jdbc.core.simple.JdbcClient.class, com.docs0.TestDatabase::jdbc);
             context.registerBean(Docs0Properties.class, () -> props("", ""));
+            context.registerBean(java.time.Clock.class, java.time.Clock::systemUTC);
             context.registerBean(SlackFakes.FakeAgent.class);
             context.registerBean(SlackFakes.FakeKnowledge.class);
             context.registerBean(SlackFakes.FakeLlm.class);
@@ -195,9 +196,10 @@ class SlackGatewayTest {
                 .containsEntry("messages_tab_read_only_enabled", false);
         assertThat((List<String>) scopes.get("bot")).containsExactlyInAnyOrder("app_mentions:read", "chat:write",
                 "channels:history", "groups:history", "im:history", "mpim:history", "channels:read", "groups:read",
-                "im:read", "im:write", "mpim:read", "users:read", "users:read.email", "channels:join", "reactions:read");
+                "im:write", "mpim:read", "users:read", "users:read.email", "channels:join", "reactions:read");
         assertThat((List<String>) events.get("bot_events")).containsExactlyInAnyOrder("app_mention",
-                "message.channels", "message.groups", "message.im", "message.mpim", "reaction_added", "reaction_removed");
+                "message.channels", "message.groups", "message.im", "message.mpim", "reaction_added", "reaction_removed",
+                "app_uninstalled", "tokens_revoked");
         assertThat(settings).containsEntry("socket_mode_enabled", true);
         assertThat(interactivity).containsEntry("is_enabled", true);
     }

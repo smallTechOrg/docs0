@@ -56,14 +56,25 @@ public interface Agent {
             /** Ids of the approved corrections that were put in front of the model for this answer. */
             List<Long> correctionIds,
             /** Issues or cards drafted for the asker to confirm; nothing has been created yet. */
-            List<PendingAction> drafts) {
+            List<PendingAction> drafts,
+            /** True when any restricted document was returned to the model (search, read or recent), cited or not. */
+            boolean usedRestricted) {
+
+        /** A result that did not use a restricted document. */
+        public AgentResult(Kind kind, String answer, Confidence confidence, List<Citation> citations,
+                List<String> followUps, List<String> suggestedPeople, int steps, long inputTokens,
+                long outputTokens, BigDecimal costUsd, long durationMs, String error, List<Long> correctionIds,
+                List<PendingAction> drafts) {
+            this(kind, answer, confidence, citations, followUps, suggestedPeople, steps, inputTokens, outputTokens,
+                    costUsd, durationMs, error, correctionIds, drafts, false);
+        }
 
         /** A result that drafted nothing. */
         public AgentResult(Kind kind, String answer, Confidence confidence, List<Citation> citations,
                 List<String> followUps, List<String> suggestedPeople, int steps, long inputTokens,
                 long outputTokens, BigDecimal costUsd, long durationMs, String error, List<Long> correctionIds) {
             this(kind, answer, confidence, citations, followUps, suggestedPeople, steps, inputTokens, outputTokens,
-                    costUsd, durationMs, error, correctionIds, List.of());
+                    costUsd, durationMs, error, correctionIds, List.of(), false);
         }
 
         /** A result that used no corrections and drafted nothing. */
@@ -71,7 +82,7 @@ public interface Agent {
                 List<String> followUps, List<String> suggestedPeople, int steps, long inputTokens,
                 long outputTokens, BigDecimal costUsd, long durationMs, String error) {
             this(kind, answer, confidence, citations, followUps, suggestedPeople, steps, inputTokens, outputTokens,
-                    costUsd, durationMs, error, List.of(), List.of());
+                    costUsd, durationMs, error, List.of(), List.of(), false);
         }
     }
 

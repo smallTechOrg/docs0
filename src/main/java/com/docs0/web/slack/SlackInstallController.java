@@ -3,6 +3,7 @@ package com.docs0.web.slack;
 import com.docs0.config.Docs0Properties;
 import com.docs0.slack.SlackInstaller;
 import com.docs0.slack.SlackOAuth;
+import com.docs0.web.IpRateLimiter;
 import com.docs0.web.admin.AdminGuard;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpSession;
@@ -39,8 +40,11 @@ public class SlackInstallController {
     private final SlackOAuth oauth;
     private final SlackInstaller installer;
     private final Clock clock;
+    private final IpRateLimiter limiter;
 
-    public SlackInstallController(Docs0Properties props, SlackOAuth oauth, SlackInstaller installer, Clock clock) {
+    public SlackInstallController(Docs0Properties props, SlackOAuth oauth, SlackInstaller installer, Clock clock,
+            IpRateLimiter limiter) {
+        this.limiter = limiter;
         this.props = props;
         this.oauth = oauth;
         this.installer = installer;
@@ -53,6 +57,9 @@ public class SlackInstallController {
             return page(HttpStatus.NOT_FOUND, false, "Add to Slack is not enabled",
                     "This docs0 is set up for a single company, so it cannot be added to other workspaces.", null,
                     null, null);
+        }
+        if (!limiter.allow(request)) {
+            return tooMany();
         }
         String state = AdminGuard.randomToken();
         request.getSession().setAttribute(STATE_ATTRIBUTE, new PendingState(state, clock.instant()));
@@ -69,6 +76,9 @@ public class SlackInstallController {
             @RequestParam(name = "error", required = false) String error) {
         if (!props.multiTenant()) {
             return install(request, model);
+        }
+        if (!limiter.allow(request)) {
+            return tooMany();
         }
         // The state is good for one callback only, whatever the outcome.
         HttpSession session = request.getSession(false);
@@ -115,6 +125,12 @@ public class SlackInstallController {
         return page(HttpStatus.OK, true, "docs0 is installed",
                 "docs0 is installed in " + team + ". Next: sign in to connect your docs.", null, "/admin/login",
                 "Sign in with Slack");
+    }
+
+    /** The page for a client that is asking too often. */
+    public static org.springframework.web.servlet.ModelAndView tooMany() {
+        return page(HttpStatus.TOO_MANY_REQUESTS, false, "Too many requests",
+                "Too many requests from your address. Wait a minute and try again.", null, null, null);
     }
 
     /** A small public page. Everything shown is plain text; nothing from the request or any token is echoed. */

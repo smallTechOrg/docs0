@@ -83,6 +83,7 @@ public class BoltSlackMessenger implements SlackMessenger {
     public void updateMessage(String channel, String ts, String text, List<LayoutBlock> blocks) {
         call("chat.update", () -> client.chatUpdate(r -> {
             r.channel(channel).ts(ts).text(text);
+            // chat.update has no unfurl options; links in an existing message are not unfurled again.
             if (blocks != null && !blocks.isEmpty()) {
                 r.blocks(blocks);
             }
@@ -107,6 +108,15 @@ public class BoltSlackMessenger implements SlackMessenger {
             }
         }
         return members;
+    }
+
+    @Override
+    public ChannelPrivacy channelPrivacy(String channel) {
+        var info = call("conversations.info", () -> client.conversationsInfo(r -> r.channel(channel))).getChannel();
+        if (info == null) {
+            throw new SlackCallException("conversations.info", "no_channel", null);
+        }
+        return info.isPrivate() || info.isIm() || info.isMpim() ? ChannelPrivacy.PRIVATE : ChannelPrivacy.PUBLIC;
     }
 
     @Override
@@ -151,6 +161,7 @@ public class BoltSlackMessenger implements SlackMessenger {
                 break;
             }
         }
+        failIfTruncated("conversations.list", cursor);
         return channels;
     }
 
@@ -171,6 +182,7 @@ public class BoltSlackMessenger implements SlackMessenger {
                 break;
             }
         }
+        failIfTruncated("conversations.history", cursor);
         return messages;
     }
 
@@ -190,7 +202,15 @@ public class BoltSlackMessenger implements SlackMessenger {
                 break;
             }
         }
+        failIfTruncated("conversations.replies", cursor);
         return messages;
+    }
+
+    /** A listing cut short by the page limit must never be taken for the whole: whoever deletes by it would lose data. */
+    private static void failIfTruncated(String method, String cursor) {
+        if (cursor != null) {
+            throw new SlackCallException(method, "too_many_pages", null);
+        }
     }
 
     private static SlackMessage message(com.slack.api.model.Message m) {

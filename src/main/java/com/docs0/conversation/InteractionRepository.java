@@ -36,7 +36,7 @@ public class InteractionRepository {
             AgentResult result, String answerTs) {
         List<Long> correctionIds = result.correctionIds() == null ? List.of() : result.correctionIds();
         List<Citation> citations = result.citations() == null ? List.of() : result.citations();
-        boolean restricted = anyRestricted(tenantId, citations.stream().map(Citation::documentId).toList());
+        boolean restricted = result.usedRestricted() || anyRestricted(tenantId, citations.stream().map(Citation::documentId).toList());
         return insertRow(tenantId, conversationId, slackUserId, question, result.answer(), result.kind().name(),
                 result.confidence() == null ? null : result.confidence().name(), JSON.writeValueAsString(citations),
                 result.steps(), result.inputTokens(), result.outputTokens(),

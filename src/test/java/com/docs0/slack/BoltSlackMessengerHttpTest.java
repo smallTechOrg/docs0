@@ -122,6 +122,35 @@ class BoltSlackMessengerHttpTest {
     }
 
     @Test
+    void historyThatHitsThePageLimitFailsInsteadOfReturningAPartialList() {
+        for (int i = 0; i < BoltSlackMessenger.MAX_HISTORY_PAGES; i++) {
+            reply("{\"ok\":true,\"has_more\":true,\"messages\":[{\"type\":\"message\",\"ts\":\"1793614800.000200\","
+                    + "\"user\":\"U2\",\"text\":\"m\"}],\"response_metadata\":{\"next_cursor\":\"more\"}}");
+        }
+
+        assertThatThrownBy(() -> messenger.history("C1", Instant.EPOCH)).isInstanceOfSatisfying(SlackCallException.class,
+                e -> assertThat(e.code()).isEqualTo("too_many_pages"));
+        assertThat(requests).hasSize(BoltSlackMessenger.MAX_HISTORY_PAGES);
+    }
+
+    @Test
+    void aChannelsPrivacyComesFromConversationsInfo() {
+        reply("{\"ok\":true,\"channel\":{\"id\":\"C1\",\"is_channel\":true,\"is_private\":false}}");
+        reply("{\"ok\":true,\"channel\":{\"id\":\"G1\",\"is_group\":true,\"is_private\":true}}");
+        reply("{\"ok\":true,\"channel\":{\"id\":\"G2\",\"is_mpim\":true,\"is_private\":true}}");
+        reply("{\"ok\":true,\"channel\":{\"id\":\"D1\",\"is_im\":true}}");
+        reply("{\"ok\":false,\"error\":\"channel_not_found\"}");
+
+        assertThat(messenger.channelPrivacy("C1")).isEqualTo(SlackMessenger.ChannelPrivacy.PUBLIC);
+        assertThat(messenger.channelPrivacy("G1")).isEqualTo(SlackMessenger.ChannelPrivacy.PRIVATE);
+        assertThat(messenger.channelPrivacy("G2")).isEqualTo(SlackMessenger.ChannelPrivacy.PRIVATE);
+        assertThat(messenger.channelPrivacy("D1")).isEqualTo(SlackMessenger.ChannelPrivacy.PRIVATE);
+        assertThatThrownBy(() -> messenger.channelPrivacy("C9")).isInstanceOf(SlackCallException.class);
+        assertThat(requests).extracting(Req::method).containsOnly("conversations.info");
+        assertThat(requests.get(0).params()).containsEntry("channel", "C1");
+    }
+
+    @Test
     void historyAsksFromTheGivenInstantAndFollowsPaging() {
         reply("""
                 {"ok":true,"has_more":true,"messages":[

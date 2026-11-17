@@ -11,9 +11,10 @@ Each capability lists its behaviour and the phase that delivers it (see `roadmap
 - **Threading.** A channel answer is always posted in the thread of the triggering
   message (a new thread if the mention is top-level). A DM answer is posted in the DM,
   unthreaded, unless the user wrote inside a DM thread.
-- **Status line.** docs0 immediately posts a status message ("Searching Drive…"), updates
+- **Status line.** docs0 immediately posts a status message ("Searching your docs…"), updates
   it in place as tools run ("Reading *Pricing 2026*…"), then replaces it with the answer.
-  Updates are throttled to one per second.
+  Updates are throttled to one per second. Everything in a status line (titles, search words) is escaped for
+  Slack and titles and queries are cut to 80 characters.
 - **Answer layout.** Answer text with `[n]` markers; a Sources section listing each
   cited document as a numbered link with its quoted snippet as a block quote; for low
   confidence a visible "Low confidence" note; suggested people when present; up to three
@@ -73,7 +74,7 @@ clarifying questions, honest "I don't know", suggested people, conflict handling
 
 ## C4. Status page (Phase 1)
 
-`/` shows: a link to the Sources page; Slack, Anthropic, Drive, Linear, Trello and Grain connection state with the reason when one is off;
+`/` shows: a link to the Sources page; connection state, with the reason when one is off, for every component: Database, Slack, Anthropic, Google Drive, Gmail, Linear, Trello, Grain and Slack history;
 document count; last sync run; number of questions answered. `/health` returns JSON
 `{"status":"UP", ...}` with the same component states. No secrets are shown.
 
@@ -160,7 +161,9 @@ Slack thread, only after the asker confirms. It never edits or deletes anything 
 
 Grain notes and transcripts as shared knowledge (Phase 4b, built). Slack public channels as shared
 knowledge; private channels as restricted knowledge visible only when every audience member
-is in that channel. Introduces the audience filter (Phase 4a, built).
+is in that channel. Introduces the audience filter (Phase 4a, built). **Public-channel rule:** restricted
+knowledge is used only in DMs and in private channels (and group DMs) where every member is entitled; a public
+channel, or a channel whose privacy cannot be determined, only ever gets shared knowledge (see `spec/agent.md`).
 
 **Slack history (built).** Source `Slack history` (kind `SLACK`), using the bot token already in
 settings. The admin ticks channels on the Sources page; nothing is indexed until one is chosen.
@@ -240,7 +243,10 @@ page, counted failed); a failing thread or mailbox never aborts the run; a rejec
 the run and deletes nothing. Status component `Gmail`.
 
 **Matching to Slack.** Mailbox principals are emails, so the Slack app needs `users:read.email`; when a
-person's email is unknown their mail is hidden from them.
+person's email is unknown their mail is hidden from them. Mail is used in a DM with the owner or viewer and in
+a private channel whose every member is a principal, never in a public channel. The key's `token_uri` must be
+Google's (`https://oauth2.googleapis.com/token`, or absent): any other value is refused at paste time and the
+token endpoint is forced to Google's whatever a stored key says; key fields over 500 characters are refused.
 
 **Admin dashboard.** Answers that cited a restricted document are never rendered on admin pages (see
 `spec/agent.md`, "Admin pages and private answers").
@@ -310,7 +316,9 @@ one admin password, one configured tenant).
   global tenant.
 - A Slack workspace registry (`slack_installation`, bot token encrypted at rest) and a Slack client per tenant;
   events from an unregistered workspace are ignored.
-- Per-tenant monthly budget, and tenant suspension (questions refused politely, syncs and jobs skipped).
+- Per-tenant monthly budget (`tenant.monthly_budget_usd`: NULL uses the global `DOCS0_MONTHLY_BUDGET_USD`, 0
+  means no budget at all and refuses every question; a company that installs itself starts with
+  `DOCS0_NEW_TENANT_BUDGET_USD`, default 5, the pilot tenant with the global default), and tenant suspension (questions refused politely, syncs and jobs skipped).
 - Composite foreign keys so the database refuses cross-tenant references, a full tenant-predicate audit, and a
   two-tenant test suite that proves isolation for search, answers, corrections, feedback, conversations,
   proactive answers, stale flags, insights, digest, costs, budgets, sync, credentials, the Slack registry,
@@ -340,14 +348,23 @@ one admin password, one configured tenant).
 - **Sign in with Slack.** `SlackAdminAuthenticator` (consulted first in this mode): `GET /admin/login` ->
   Slack OpenID Connect with state and nonce in the session; the callback maps the person's workspace to the tenant
   with that `slack_team_id` and admits them if their email is in `tenant.admin_emails` or Slack says they are a
-  workspace admin or owner. The `AdminPrincipal(tenantId, name)` lives in a server-side session (id rotated at
-  sign-in, `HttpOnly`, `SameSite=Lax`, `Secure` on https, 8-hour idle timeout); `POST /admin/logout` ends it.
+  workspace admin or owner. The `AdminPrincipal(tenantId, name, email, slackUserId)` lives in a server-side session
+  (id rotated at sign-in, `HttpOnly`, `SameSite=Lax`, `Secure` on https, 8-hour idle timeout and a 12-hour absolute
+  lifetime); `POST /admin/logout` ends it. The "may administer" check (admin list or workspace admin) is repeated
+  at most every 5 minutes per session; a failed check ends the session, and when Slack cannot be reached the last
+  good answer holds for 15 more minutes, then the session ends. The install and sign-in pages and their callbacks
+  are limited to 30 requests a minute per address (the forwarded address counts only for connections from this
+  machine), and only a request that starts a flow creates a session.
   Browsers without a session are redirected to `/admin/login`, other clients get 401, and the pilot's loopback
-  shortcut is off. A suspended tenant's admins see only a suspended page. The session's tenant is the only tenant
+  shortcut is off (in the pilot it also requires a `localhost`, `127.0.0.1` or `[::1]` Host header; set
+  `DOCS0_ADMIN_PASSWORD` otherwise). A suspended tenant's admins see only a suspended page. The session's tenant is the only tenant
   any admin page or form can touch.
 - **Landing page and Start.** `/` is a public landing page with **Add to Slack** and **Sign in**, and `/health`
   returns only `{"status":"UP"}`. `GET /admin/start` is the company's checklist (Slack connected, each source's
   status with a link, inviting docs0, a sample question, the budget) and manages up to 20 admin emails.
+- **Links and unfurling.** A link in a model-written answer stays a link only when it is https and leads to the
+  host of a cited document or to `slack.com`; any other URL is shown as code text. Posted messages set
+  `unfurl_links` and `unfurl_media` to false (`chat.update` has no such option).
 - **Manifests.** `slack/manifest-distributed.yml` (HTTP, `socket_mode_enabled: false`) next to the pilot's
   `slack/manifest.yml`; a test requires the same bot scopes and events.
 

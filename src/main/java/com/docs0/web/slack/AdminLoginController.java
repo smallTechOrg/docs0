@@ -8,6 +8,7 @@ import com.docs0.slack.SlackWorkspaces;
 import com.docs0.tenant.AdminEmails;
 import com.docs0.tenant.Tenant;
 import com.docs0.tenant.TenantService;
+import com.docs0.web.IpRateLimiter;
 import com.docs0.web.admin.AdminGuard;
 import com.docs0.web.admin.AdminPrincipal;
 import com.docs0.web.admin.SlackAdminAuthenticator;
@@ -51,9 +52,11 @@ public class AdminLoginController {
     private final SlackWorkspaces workspaces;
     private final SlackMessengers messengers;
     private final Clock clock;
+    private final IpRateLimiter limiter;
 
     public AdminLoginController(Docs0Properties props, SlackSignIn signIn, TenantService tenants,
-            SlackWorkspaces workspaces, SlackMessengers messengers, Clock clock) {
+            SlackWorkspaces workspaces, SlackMessengers messengers, Clock clock, IpRateLimiter limiter) {
+        this.limiter = limiter;
         this.props = props;
         this.signIn = signIn;
         this.tenants = tenants;
@@ -66,6 +69,9 @@ public class AdminLoginController {
     public Object login(HttpServletRequest request) {
         if (!props.multiTenant()) {
             return notEnabled();
+        }
+        if (!limiter.allow(request)) {
+            return SlackInstallController.tooMany();
         }
         PendingLogin pending = new PendingLogin(AdminGuard.randomToken(), AdminGuard.randomToken(), clock.instant());
         request.getSession().setAttribute(LOGIN_ATTRIBUTE, pending);
@@ -81,6 +87,9 @@ public class AdminLoginController {
             @RequestParam(name = "error", required = false) String error) {
         if (!props.multiTenant()) {
             return notEnabled();
+        }
+        if (!limiter.allow(request)) {
+            return SlackInstallController.tooMany();
         }
         // The state is good for one callback only, whatever the outcome.
         HttpSession session = request.getSession(false);
@@ -130,7 +139,8 @@ public class AdminLoginController {
         request.changeSessionId();
         session.setMaxInactiveInterval((int) IDLE_TIMEOUT.toSeconds());
         String name = who.name() == null ? "admin" : who.name();
-        session.setAttribute(SlackAdminAuthenticator.SESSION_ATTRIBUTE, new AdminPrincipal(tenant.get().id(), name));
+        SlackAdminAuthenticator.signIn(session,
+                new AdminPrincipal(tenant.get().id(), name, who.email(), who.userId()), clock.instant());
         log.info("Slack sign-in: tenant={}", tenant.get().id());
         return new RedirectView("/admin/start", true);
     }

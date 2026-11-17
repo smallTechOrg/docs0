@@ -33,6 +33,10 @@ class GoogleTokenSourceTest {
     volatile String reply = "{\"access_token\":\"ya29.fake-token\",\"token_type\":\"Bearer\",\"expires_in\":3599}";
     String key;
 
+    private GoogleTokenSource source() {
+        return new GoogleTokenSource("http://127.0.0.1:" + server.getAddress().getPort() + "/token");
+    }
+
     @BeforeEach
     void start() throws IOException {
         server = HttpServer.create(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0);
@@ -72,7 +76,7 @@ class GoogleTokenSourceTest {
 
     @Test
     void theTokenIsRequestedForTheMailboxAndTheScopeAndComesBackWithItsExpiry() throws Exception {
-        TokenSource.Token token = new GoogleTokenSource().token(key, "ana@example.com", HttpGmailClient.GMAIL_SCOPE);
+        TokenSource.Token token = source().token(key, "ana@example.com", HttpGmailClient.GMAIL_SCOPE);
 
         assertThat(token.value()).isEqualTo("ya29.fake-token");
         assertThat(token.expiresAt()).isAfter(Instant.now().plusSeconds(3000)).isBefore(Instant.now().plusSeconds(3700));
@@ -85,7 +89,7 @@ class GoogleTokenSourceTest {
 
     @Test
     void theDirectoryScopeAndTheAdminAreUsedWhenAsked() throws Exception {
-        new GoogleTokenSource().token(key, "admin@example.com", HttpGmailClient.DIRECTORY_SCOPE);
+        source().token(key, "admin@example.com", HttpGmailClient.DIRECTORY_SCOPE);
 
         assertThat(assertion().get("sub").getAsString()).isEqualTo("admin@example.com");
         assertThat(assertion().get("scope").getAsString()).isEqualTo(HttpGmailClient.DIRECTORY_SCOPE);
@@ -96,7 +100,7 @@ class GoogleTokenSourceTest {
         status = 400; // Google answers token-request refusals with 400
         reply = "{\"error\":\"unauthorized_client\",\"error_description\":\"Client is unauthorized to retrieve access tokens using this method, or client not authorized for any of the scopes requested.\"}";
 
-        assertThatThrownBy(() -> new GoogleTokenSource().token(key, "ana@example.com", HttpGmailClient.GMAIL_SCOPE))
+        assertThatThrownBy(() -> source().token(key, "ana@example.com", HttpGmailClient.GMAIL_SCOPE))
                 .isExactlyInstanceOf(SourceAccessException.class)
                 .hasMessage("Gmail access isn't authorised for ana@example.com yet. Check domain-wide delegation in the Workspace Admin console.");
     }
@@ -105,36 +109,59 @@ class GoogleTokenSourceTest {
     void anUnknownOrSuspendedPersonIsNamedAndABadKeyStopsTheWholeRun() {
         status = 400;
         reply = "{\"error\":\"invalid_grant\",\"error_description\":\"Invalid email or User ID\"}";
-        assertThatThrownBy(() -> new GoogleTokenSource().token(key, "ghost@example.com", HttpGmailClient.GMAIL_SCOPE))
+        assertThatThrownBy(() -> source().token(key, "ghost@example.com", HttpGmailClient.GMAIL_SCOPE))
                 .isExactlyInstanceOf(SourceAccessException.class)
                 .hasMessage("ghost@example.com can't be accessed. The person may not exist or may be suspended.");
 
         reply = "{\"error\":\"invalid_grant\",\"error_description\":\"Invalid JWT Signature.\"}";
-        assertThatThrownBy(() -> new GoogleTokenSource().token(key, "ana@example.com", HttpGmailClient.GMAIL_SCOPE))
+        assertThatThrownBy(() -> source().token(key, "ana@example.com", HttpGmailClient.GMAIL_SCOPE))
                 .isInstanceOf(GmailClient.KeyRejectedException.class).hasMessage(HttpGmailClient.KEY_REJECTED);
     }
 
     @Test
     void aKeyThatCannotBeReadIsRejectedWithoutQuotingIt() {
-        assertThatThrownBy(() -> new GoogleTokenSource().token("{\"type\":\"service_account\",\"private_key\":\"nope\"}",
+        assertThatThrownBy(() -> source().token("{\"type\":\"service_account\",\"private_key\":\"nope\"}",
                 "ana@example.com", HttpGmailClient.GMAIL_SCOPE))
                 .isInstanceOf(GmailClient.KeyRejectedException.class).hasMessage(HttpGmailClient.KEY_REJECTED);
     }
 
     @Test
+    void aKeyThatNamesAnotherTokenHostIsRefusedAndTheStandardOneIsAlwaysUsed() throws Exception {
+        assertThat(GmailKey.parse(TestKeys.json("https://evil.example/token"))).isEmpty();
+        assertThat(GmailKey.parse(TestKeys.json("http://169.254.169.254/latest"))).isEmpty();
+        assertThat(GmailKey.parse(TestKeys.json("https://oauth2.googleapis.com.evil.example/token"))).isEmpty();
+        // No token_uri at all is fine: Google's is used.
+        String withoutUri = TestKeys.json().replaceAll(",\"token_uri\":\"[^\"]*\"", "");
+        assertThat(withoutUri).doesNotContain("token_uri");
+        assertThat(GmailKey.parse(withoutUri)).isPresent();
+
+        // A key stored before this rule, naming another host, still only ever talks to Google.
+        var credentials = GoogleTokenSource.credentials(TestKeys.json("https://evil.example/token"),
+                GmailKey.TOKEN_URI, "ana@example.com", HttpGmailClient.GMAIL_SCOPE);
+        assertThat(credentials.getTokenServerUri()).hasToString("https://oauth2.googleapis.com/token");
+    }
+
+    @Test
+    void absurdlyLongKeyFieldsAreRefused() {
+        assertThat(GmailKey.parse(TestKeys.json().replace("abcdef0123456789", "k".repeat(501)))).isEmpty();
+        assertThat(GmailKey.parse(TestKeys.json().replace(TestKeys.EMAIL, "a".repeat(501) + "@example.com"))).isEmpty();
+        assertThat(GmailKey.parse(TestKeys.json().replace("abcdef0123456789", "k".repeat(500)))).isPresent();
+    }
+
+    @Test
     void onlyARealServiceAccountKeyIsAccepted() {
-        assertThat(GmailKey.parse(key)).contains(new GmailKey(TestKeys.EMAIL, TestKeys.CLIENT_ID));
+        assertThat(GmailKey.parse(TestKeys.json())).contains(new GmailKey(TestKeys.EMAIL, TestKeys.CLIENT_ID));
 
         assertThat(GmailKey.parse(null)).isEmpty();
         assertThat(GmailKey.parse("   ")).isEmpty();
         assertThat(GmailKey.parse("not json at all")).isEmpty();
         assertThat(GmailKey.parse("[1,2]")).isEmpty();
-        assertThat(GmailKey.parse(key.replace("service_account", "authorized_user"))).isEmpty();
-        assertThat(GmailKey.parse(key.replace(TestKeys.EMAIL, ""))).isEmpty();
-        assertThat(GmailKey.parse(key.replace(TestKeys.CLIENT_ID, "abc"))).isEmpty();
-        assertThat(GmailKey.parse(key.replaceAll("\"private_key\":\"[^\"]*\"", "\"private_key\":\"-----BEGIN PRIVATE KEY-----\\\\nAAAA\\\\n-----END PRIVATE KEY-----\\\\n\""))).isEmpty();
+        assertThat(GmailKey.parse(TestKeys.json().replace("service_account", "authorized_user"))).isEmpty();
+        assertThat(GmailKey.parse(TestKeys.json().replace(TestKeys.EMAIL, ""))).isEmpty();
+        assertThat(GmailKey.parse(TestKeys.json().replace(TestKeys.CLIENT_ID, "abc"))).isEmpty();
+        assertThat(GmailKey.parse(TestKeys.json().replaceAll("\"private_key\":\"[^\"]*\"", "\"private_key\":\"-----BEGIN PRIVATE KEY-----\\\\nAAAA\\\\n-----END PRIVATE KEY-----\\\\n\""))).isEmpty();
         assertThat(GmailKey.parse("{\"type\":\"service_account\"}")).isEmpty();
         assertThat(GmailKey.parse("x".repeat(30_000))).isEmpty();
-        assertThat(GmailKey.parse(key).orElseThrow().toString()).doesNotContain("PRIVATE").contains(TestKeys.EMAIL);
+        assertThat(GmailKey.parse(TestKeys.json()).orElseThrow().toString()).doesNotContain("PRIVATE").contains(TestKeys.EMAIL);
     }
 }

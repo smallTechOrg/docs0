@@ -23,14 +23,22 @@ public class GoogleTokenSource implements TokenSource {
 
     private static final Logger log = LoggerFactory.getLogger(GoogleTokenSource.class);
 
+    private final String tokenUri;
+
+    public GoogleTokenSource() {
+        this(GmailKey.TOKEN_URI);
+    }
+
+    /** For tests that run a token endpoint of their own: production always uses Google's. */
+    GoogleTokenSource(String tokenUri) {
+        this.tokenUri = tokenUri;
+    }
+
     @Override
     public Token token(String keyJson, String subject, String scope) throws IOException {
         ServiceAccountCredentials credentials;
         try {
-            credentials = ServiceAccountCredentials
-                    .fromStream(new ByteArrayInputStream(keyJson.getBytes(StandardCharsets.UTF_8)));
-            credentials = (ServiceAccountCredentials) credentials.createScoped(List.of(scope))
-                    .createDelegated(subject);
+            credentials = credentials(keyJson, tokenUri, subject, scope);
         } catch (IOException | RuntimeException e) {
             throw new GmailClient.KeyRejectedException(HttpGmailClient.KEY_REJECTED);
         }
@@ -42,6 +50,18 @@ public class GoogleTokenSource implements TokenSource {
         } catch (IOException | RuntimeException e) {
             throw refused(subject, e);
         }
+    }
+
+    /**
+     * The credentials for one subject. The token endpoint is always Google's, whatever the stored key says, so a
+     * key can never make the server call another host.
+     */
+    static ServiceAccountCredentials credentials(String keyJson, String tokenUri, String subject, String scope)
+            throws IOException {
+        ServiceAccountCredentials credentials = ServiceAccountCredentials
+                .fromStream(new ByteArrayInputStream(keyJson.getBytes(StandardCharsets.UTF_8)));
+        credentials = credentials.toBuilder().setTokenServerUri(java.net.URI.create(tokenUri)).build();
+        return (ServiceAccountCredentials) credentials.createScoped(List.of(scope)).createDelegated(subject);
     }
 
     /** Turns a failed token request into the message an admin can act on. */

@@ -7,6 +7,7 @@ import com.docs0.source.Source;
 import com.docs0.source.SourceAccessException;
 import com.docs0.source.SourceCredential;
 import com.docs0.source.SourceConnector;
+import com.docs0.source.StatusText;
 import com.docs0.source.SyncCounts;
 import com.docs0.source.SyncRun;
 import com.docs0.source.SyncRunRepository;
@@ -32,7 +33,6 @@ public class DriveConnector implements SourceConnector, StatusContributor {
     public static final String NAME = DriveConnection.NAME;
 
     private static final Logger log = LoggerFactory.getLogger(DriveConnector.class);
-    private static final int MAX_STATUS_ERROR_CHARS = 120;
 
     private final DriveClient client;
     private final DriveConnection connection;
@@ -84,6 +84,15 @@ public class DriveConnector implements SourceConnector, StatusContributor {
         List<String> folderIds = connection.folders(tenantId).stream().map(Folder::id).toList();
         List<DriveFile> files = client.listFiles(tenantId, folderIds);
         Map<String, Instant> stored = documents.modifiedTimes(tenantId, sourceId);
+        // Chosen folders that come back with no file at all while documents are stored is more likely a lost
+        // permission, a moved folder or a Drive hiccup than a folder that was emptied: keep the documents. Taking
+        // the folders off the selection is how an admin says they really want them gone.
+        if (!folderIds.isEmpty() && !stored.isEmpty()
+                && files.stream().allMatch(f -> DriveText.FOLDER.equals(f.mimeType()))) {
+            throw new IOException("Google Drive returned no files in the chosen folders, but " + stored.size()
+                    + " documents from them are indexed. They were kept. If the folders really are empty, remove "
+                    + "them from the selection.");
+        }
 
         Set<String> indexable = new HashSet<>();
         int added = 0;
@@ -155,7 +164,7 @@ public class DriveConnector implements SourceConnector, StatusContributor {
         }
         SyncRun run = last.get();
         if (SyncRun.FAILED.equals(run.status())) {
-            return ComponentStatus.down(NAME, "last sync failed: " + shorten(run.error()));
+            return ComponentStatus.down(NAME, "last sync failed: " + StatusText.shorten(run.error()));
         }
         long count = documents.count(tenantId, sourceId);
         if (SyncRun.RUNNING.equals(run.status())) {
@@ -163,13 +172,5 @@ public class DriveConnector implements SourceConnector, StatusContributor {
         }
         return ComponentStatus.up(NAME, count + " documents, last sync "
                 + run.finishedAt().truncatedTo(ChronoUnit.SECONDS));
-    }
-
-    private static String shorten(String error) {
-        if (error == null || error.isBlank()) {
-            return "unknown error";
-        }
-        String oneLine = error.replaceAll("\\s+", " ").trim();
-        return oneLine.length() > MAX_STATUS_ERROR_CHARS ? oneLine.substring(0, MAX_STATUS_ERROR_CHARS) + "..." : oneLine;
     }
 }

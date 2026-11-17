@@ -68,7 +68,8 @@ class QuestionHandlerTest {
     private CorrectionFlow correctionFlow(Docs0Properties props) {
         return new CorrectionFlow(new CorrectionDetector(llm, props), new ConversationRepository(jdbc),
                 new InteractionRepository(jdbc), new com.docs0.feedback.FeedbackRepository(jdbc),
-                new com.docs0.feedback.CorrectionRepository(jdbc), slack);
+                new com.docs0.feedback.CorrectionRepository(jdbc), slack, new TenantService(jdbc),
+                new BudgetService(jdbc, props));
     }
 
     // ---- where the answer goes ---------------------------------------------------------------
@@ -277,6 +278,20 @@ class QuestionHandlerTest {
             assertThat(u.channel()).isEqualTo(CHANNEL);
         });
         assertThat(slack.lastUpdate().blocks()).isNotEmpty();
+    }
+
+    @Test
+    void statusLinesNeutraliseSlackControlTextFromTitlesAndQueries() throws Exception {
+        agent.behaviour = (request, progress) -> {
+            progress.onStatus("Reading *<!channel> <https://evil.example|click here> R&D*…");
+            return SlackFakes.result(Kind.ANSWER, "Done.");
+        };
+
+        await(handler.handle(tenantId, mention("<@UBOT> what is our pricing?", "100.1", null, "Ev1")));
+
+        assertThat(slack.updates.get(0).text())
+                .isEqualTo("Reading *&lt;!channel&gt; &lt;https://evil.example|click here&gt; R&amp;D*…")
+                .doesNotContain("<");
     }
 
     @Test

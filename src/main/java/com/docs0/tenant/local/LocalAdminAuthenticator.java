@@ -75,13 +75,35 @@ public class LocalAdminAuthenticator implements AdminAuthenticator {
         return userOk & passwordOk;
     }
 
+    /** True for localhost, 127.0.0.1 and [::1], with or without a port. Without a Host header the server name decides. */
+    static boolean loopbackHost(String hostHeader, String serverName) {
+        String host = hostHeader == null ? serverName : hostHeader.strip();
+        if (host == null) {
+            return false;
+        }
+        if (host.startsWith("[")) {
+            int end = host.indexOf(']');
+            host = end < 0 ? host : host.substring(0, end + 1);
+        } else {
+            int colon = host.indexOf(':');
+            host = colon < 0 ? host : host.substring(0, colon);
+        }
+        host = host.toLowerCase(java.util.Locale.ROOT);
+        return host.equals("localhost") || host.equals("127.0.0.1") || host.equals("[::1]");
+    }
+
     /**
      * True for a loopback connection that did not come through a proxy. A reverse proxy on
      * this machine makes every visitor look local, so anything carrying forwarding headers
-     * is refused: set DOCS0_ADMIN_PASSWORD when docs0 sits behind a proxy.
+     * is refused, and so is any Host other than localhost, 127.0.0.1 or [::1]: set DOCS0_ADMIN_PASSWORD when docs0
+     * sits behind a proxy or is reached by another name.
      */
     private static boolean fromThisMachine(HttpServletRequest request) {
         if (request.getHeader("X-Forwarded-For") != null || request.getHeader("Forwarded") != null) {
+            return false;
+        }
+        // A page served under another name (DNS rebinding, a forged Host) is not "this machine".
+        if (!loopbackHost(request.getHeader("Host"), request.getServerName())) {
             return false;
         }
         try {

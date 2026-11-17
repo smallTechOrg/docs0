@@ -52,6 +52,18 @@ class AdminAccessTest extends IntegrationTest {
     }
 
     @Test
+    void aLoopbackRequestForAnotherHostNameIsRefused() throws Exception {
+        for (String host : new String[] {"evil.example", "evil.example:8080", "localhost.evil.example", "127.0.0.1.nip.io",
+                "10.0.0.5:8080", "[::2]", ""}) {
+            mvc.perform(get("/admin/sources").header("Host", host)).andExpect(status().isForbidden());
+        }
+        for (String host : new String[] {"localhost", "localhost:8090", "LOCALHOST:8080", "127.0.0.1", "127.0.0.1:8090",
+                "[::1]", "[::1]:8090"}) {
+            mvc.perform(get("/admin/sources").header("Host", host)).andExpect(status().isOk());
+        }
+    }
+
+    @Test
     void aLocalRequestThatCameThroughAProxyIsNotTreatedAsLocal() throws Exception {
         mvc.perform(get("/admin/sources").header("X-Forwarded-For", "203.0.113.9"))
                 .andExpect(status().isForbidden());

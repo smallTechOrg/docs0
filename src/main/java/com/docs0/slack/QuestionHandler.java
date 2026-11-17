@@ -66,6 +66,8 @@ public class QuestionHandler {
     private static final int MAX_STATUS_CHARS = 300;
     private static final int MAX_ERROR_CHARS = 1000;
     private static final int DEDUPE_CAPACITY = 5000;
+    private static final long PRIVACY_TTL_NANOS = TimeUnit.MINUTES.toNanos(5);
+    private static final int PRIVACY_CAPACITY = 5000;
     private static final CompletableFuture<Void> DONE = CompletableFuture.completedFuture(null);
 
     /** Only asks whether a tenant is active: which tenant an event belongs to is decided by the caller. */
@@ -84,6 +86,11 @@ public class QuestionHandler {
     private final StaleDocs staleDocs;
     private final UsageLog usage;
     private final long statusIntervalMillis;
+
+    /** Whether a channel is private, per tenant and channel, remembered for a few minutes. */
+    private final Map<String, CachedPrivacy> privacy = new ConcurrentHashMap<>();
+
+    private record CachedPrivacy(SlackMessenger.ChannelPrivacy value, long expiresAtNanos) {}
 
     private final ExecutorService workers = Executors.newVirtualThreadPerTaskExecutor();
     private final ScheduledExecutorService statusTimer = Executors.newSingleThreadScheduledExecutor(
@@ -357,6 +364,7 @@ public class QuestionHandler {
     private void answerProactively(long tenantId, Question q, ProactiveResponder.Offer offer) {
         AgentResult result = null;
         boolean shown = false;
+        boolean logged = false;
         try {
             if (!agent.available() || budget.exhausted(tenantId) || knowledge.count(tenantId) == 0) {
                 return;
@@ -383,6 +391,7 @@ public class QuestionHandler {
             shown = true;
             Conversation conversation = conversation(tenantId, q);
             long id = interactions.insert(tenantId, conversation.id(), q.user(), q.text(), result, ts);
+            logged = true;
             proactive.answered(tenantId, offer, id);
             recordStale(tenantId, id, stale);
             log.info("Answered a repeat question: tenant={} interaction={} offer={} inputTokens={} outputTokens={}",
@@ -392,6 +401,9 @@ public class QuestionHandler {
         } finally {
             if (result != null && !shown) {
                 discardDrafts(tenantId, result);
+            }
+            // An answer that is not in the interactions table is not in the cost report either: never lose cost.
+            if (result != null && !logged) {
                 recordUsage(tenantId, result);
             }
         }
@@ -525,7 +537,7 @@ public class QuestionHandler {
                 result = new AgentResult(Kind.ERROR, result.answer(), result.confidence(), result.citations(),
                         result.followUps(), result.suggestedPeople(), result.steps(), result.inputTokens(),
                         result.outputTokens(), result.costUsd(), result.durationMs(),
-                        "could not show the answer in Slack: " + reason(e), result.correctionIds(), result.drafts());
+                        "could not show the answer in Slack: " + reason(e), result.correctionIds(), result.drafts(), result.usedRestricted());
             }
         }
         try {
@@ -538,7 +550,8 @@ public class QuestionHandler {
 
     private void updateStatus(long tenantId, String channel, String statusTs, String text) {
         try {
-            String line = text.strip();
+            // Status lines can carry document titles and search words: neutralise Slack's control characters.
+            String line = AnswerRenderer.escape(text.strip());
             messenger(tenantId).updateMessage(channel, statusTs,
                     line.length() <= MAX_STATUS_CHARS ? line : line.substring(0, MAX_STATUS_CHARS - 1) + "…", null);
         } catch (Exception e) {
@@ -551,14 +564,19 @@ public class QuestionHandler {
     }
 
     /**
-     * Everyone who will see the answer: the channel's people, or just the asker in a DM. Bots,
-     * deactivated users and docs0 itself are not part of it. Each person carries their email when
-     * known, so documents shared by email can be matched. Anyone Slack cannot describe stays in as
-     * a plain Slack id, which can only make fewer restricted documents eligible, never more.
+     * Everyone who will see the answer: just the asker in a DM, the members of a private channel, and nobody
+     * (shared knowledge only) in a public channel or one whose privacy cannot be determined, because anyone in the
+     * workspace can read a public channel. Bots, deactivated users and docs0 itself are not part of it. Each person
+     * carries their email when known, so documents shared by email can be matched. Anyone Slack cannot describe stays
+     * in as a plain Slack id, which can only make fewer restricted documents eligible, never more. Every answer,
+     * prompted or not, gets its audience here.
      */
     private Audience audience(long tenantId, Question q) {
         if (q.dm()) {
             return new Audience(Set.of(asker(tenantId, q.user())));
+        }
+        if (!isPrivateChannel(tenantId, q.channel())) {
+            return Audience.sharedOnly();
         }
         try {
             Set<String> ids = messenger(tenantId).channelMembers(q.channel());
@@ -578,6 +596,31 @@ public class QuestionHandler {
         }
         // Unknown audience: everyone in the channel will see the answer, so use only shared knowledge.
         return Audience.sharedOnly();
+    }
+
+    /** True only when Slack says the channel is private. A public channel, or any failure, is not private. */
+    private boolean isPrivateChannel(long tenantId, String channel) {
+        String key = key(tenantId, channel);
+        long now = System.nanoTime();
+        CachedPrivacy cached = privacy.get(key);
+        if (cached != null && now - cached.expiresAtNanos() < 0) {
+            return cached.value() == SlackMessenger.ChannelPrivacy.PRIVATE;
+        }
+        try {
+            SlackMessenger.ChannelPrivacy value = messenger(tenantId).channelPrivacy(channel);
+            if (value == null) {
+                return false;
+            }
+            if (privacy.size() >= PRIVACY_CAPACITY) {
+                privacy.clear();
+            }
+            privacy.put(key, new CachedPrivacy(value, now + PRIVACY_TTL_NANOS));
+            return value == SlackMessenger.ChannelPrivacy.PRIVATE;
+        } catch (Exception e) {
+            log.warn("Channel privacy lookup failed, answering from shared knowledge only: channel={} error={}",
+                    channel, reason(e));
+            return false;
+        }
     }
 
     private Audience people(long tenantId, Set<String> ids) {

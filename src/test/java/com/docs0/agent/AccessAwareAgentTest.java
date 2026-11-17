@@ -98,6 +98,37 @@ class AccessAwareAgentTest extends IntegrationTest {
         assertThat(result.citations()).hasSize(1);
     }
 
+    private AgentResult readThenCite(Audience audience, long documentToRead, List<Map<String, Object>> citations) {
+        llm.calls(llm.call("read_document", "document_id", documentToRead)).calls(llm.call("submit_answer", "kind",
+                "answer", "answer", "Bonuses are discussed each spring.", "confidence", "high", "citations",
+                citations, "follow_ups", List.of(), "suggested_people", List.of()));
+        return service().answer(new AgentRequest(tenant.id(), audience, "when are bonuses discussed?", List.of()),
+                p -> {});
+    }
+
+    @Test
+    void readingARestrictedDocumentMarksTheResultWhetherOrNotTheAnswerCitesIt() {
+        Map<String, Object> sharedCitation = Map.of("document_id", sharedId, "quote", "Bonuses are discussed each spring.");
+
+        AgentResult citesOnlyShared = readThenCite(Audience.of("U1", "U2"), hiddenId, List.of(sharedCitation));
+        assertThat(citesOnlyShared.citations()).extracting(Agent.Citation::documentId).containsExactly(sharedId);
+        assertThat(citesOnlyShared.usedRestricted()).isTrue();
+
+        AgentResult citesNothing = readThenCite(Audience.of("U1", "U2"), hiddenId, List.of());
+        assertThat(citesNothing.citations()).isEmpty();
+        assertThat(citesNothing.usedRestricted()).isTrue();
+    }
+
+    @Test
+    void theResultIsNotMarkedWhenNoRestrictedDocumentWasReturned() {
+        Map<String, Object> sharedCitation = Map.of("document_id", sharedId, "quote", "Bonuses are discussed each spring.");
+
+        // The shared document only; and the restricted one asked for by an audience that may not see it.
+        assertThat(readThenCite(Audience.of("U1", "U2"), sharedId, List.of(sharedCitation)).usedRestricted()).isFalse();
+        assertThat(readThenCite(Audience.of("U1", "U2", "U3"), hiddenId, List.of(sharedCitation)).usedRestricted())
+                .isFalse();
+    }
+
     @Test
     void anAudienceWithOneOutsiderNeverSeesTheDocumentInAnyToolResultOrCitation() {
         AgentResult result = askAs(Audience.of("U1", "U2", "U3"));

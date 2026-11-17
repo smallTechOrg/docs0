@@ -43,6 +43,7 @@
       <p><b th:text="${t.label}">Pricing</b> <span class="badge" th:text="${'about ' + t.count}">about 4</span></p>
       <p class="sub" th:if="${t.example != null}">For example: <span th:text="${t.example}">example</span></p>
     </div>
+    <p class="sub pad" th:if="${themesAskedPrivately > 0 or themesUsedPrivate > 0}"><span th:text="${themesAskedPrivately}">0</span> questions asked privately and <span th:text="${themesUsedPrivate}">0</span> that used private sources are counted only; they are not part of the themes.</p>
     <div class="pad" th:if="${themeStatus == 'OK' or themeStatus == 'FAILED'}">
       <form method="post" action="/admin/insights/refresh" class="actions">
         <input type="hidden" name="_csrf" th:value="${csrf}">

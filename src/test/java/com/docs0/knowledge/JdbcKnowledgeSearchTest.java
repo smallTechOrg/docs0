@@ -35,6 +35,17 @@ class JdbcKnowledgeSearchTest extends IntegrationTest {
     }
 
     @Test
+    void theSnippetOfAMatchFarIntoALongDocumentIsHighlightedAsFarAsTheIndexReaches() {
+        // 300,000 characters before the only match: inside the 400,000 the index covers.
+        put("long", "Long report", "filler ".repeat(50_000) + "zebracrossing", T0);
+
+        SearchResult result = search.search(tenant.id(), ANYONE, "zebracrossing", 8);
+
+        assertThat(result.hits()).hasSize(1);
+        assertThat(result.hits().get(0).snippet()).contains("**zebracrossing**");
+    }
+
+    @Test
     void titleMatchOutranksBodyOnlyMatch() {
         put("body", "Team handbook", "Somewhere in here we mention the vacation policy once.", T0);
         put("title", "Vacation policy", "How much time off people get and how to book it.", T0);

@@ -1,11 +1,13 @@
 package com.docs0.slack;
 
+import com.docs0.budget.BudgetService;
 import com.docs0.conversation.Conversation;
 import com.docs0.conversation.ConversationRepository;
 import com.docs0.conversation.InteractionRepository;
 import com.docs0.conversation.InteractionRepository.Logged;
 import com.docs0.feedback.CorrectionRepository;
 import com.docs0.feedback.FeedbackRepository;
+import com.docs0.tenant.TenantService;
 import java.util.Optional;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -21,6 +23,8 @@ public class CorrectionFlow {
     static final String THANKS =
             "Thanks, I've passed that to an admin to review. It won't change my answers until they approve it.";
     private static final int MAX_FACT_CHARS = 2000;
+    /** The reply is cut to this many characters before the model sees it. */
+    static final int MAX_REPLY_CHARS = 1000;
 
     private static final Logger log = LoggerFactory.getLogger(CorrectionFlow.class);
 
@@ -30,10 +34,14 @@ public class CorrectionFlow {
     private final FeedbackRepository feedback;
     private final CorrectionRepository corrections;
     private final SlackMessengers messengers;
+    private final TenantService tenants;
+    private final BudgetService budget;
 
     public CorrectionFlow(CorrectionDetector detector, ConversationRepository conversations,
             InteractionRepository interactions, FeedbackRepository feedback, CorrectionRepository corrections,
-            SlackMessengers messengers) {
+            SlackMessengers messengers, TenantService tenants, BudgetService budget) {
+        this.tenants = tenants;
+        this.budget = budget;
         this.detector = detector;
         this.conversations = conversations;
         this.interactions = interactions;
@@ -47,8 +55,14 @@ public class CorrectionFlow {
      * acknowledged). False means: carry on and answer it as a question. Never throws.
      */
     public boolean handle(long tenantId, String channel, String replyThreadTs, String conversationThreadTs,
-            boolean dm, String user, String text) {
+            boolean dm, String user, String replyText) {
         try {
+            // A suspended or over-budget tenant gets no model call and no stored correction here: the normal
+            // question flow produces its refusal.
+            if (!tenants.isActive(tenantId) || budget.exhausted(tenantId)) {
+                return false;
+            }
+            String text = replyText.length() <= MAX_REPLY_CHARS ? replyText : replyText.substring(0, MAX_REPLY_CHARS);
             Optional<Conversation> conversation = conversations.find(tenantId, channel, conversationThreadTs);
             if (conversation.isEmpty()) {
                 return false;

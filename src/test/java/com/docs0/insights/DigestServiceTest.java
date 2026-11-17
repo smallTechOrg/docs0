@@ -193,8 +193,11 @@ class DigestServiceTest extends com.docs0.Phase6IntegrationTest {
                 .doesNotContain("<@").doesNotContain("What is the refund window?");
         // They are counted: one DM + one private channel + one private source.
         assertThat(text).contains("3 more questions not shown");
-        // Themes were worked out by one call and paid for in the usage log.
+        // Themes were worked out by one call and paid for in the usage log. The model never saw the DM question or
+        // the question behind the private-source answer; they are only counted.
         assertThat(llm.asked).hasSize(1);
+        assertThat(llm.asked.get(0)).doesNotContain("Birgit").doesNotContain("Birchwood");
+        assertThat(text).contains("2 questions asked privately or using private sources are not part of the themes");
         assertThat(jdbc.sql("SELECT purpose FROM usage_log").query(String.class).list()).containsExactly("themes");
     }
 
