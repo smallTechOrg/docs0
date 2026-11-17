@@ -322,13 +322,23 @@ class SlackHttpTransportTest {
         mvc.perform(eventRequest("T_PILOT", "Ev1").header("X-Slack-Retry-Num", "1")).andExpect(status().isOk())
                 .andExpect(content().string(""));
         mvc.perform(eventRequest("T_PILOT", "Ev1")).andExpect(status().isOk()).andExpect(content().string(""));
-        // A retry of an event this instance already finished.
-        mvc.perform(eventRequest("T_PILOT", "Ev0").header("X-Slack-Retry-Num", "2")).andExpect(status().isOk());
 
         assertThat(first.isDone()).isFalse();
         verify(questions, times(1)).handle(eq(tenantId), any());
         work.complete(null);
         assertThat(first.get(5, TimeUnit.SECONDS)).isEqualTo(200);
+    }
+
+    @Test
+    void aRetryOfAnEventThisInstanceNeverSawIsRunBecauseTheFirstAttemptMustHaveBeenLost() throws Exception {
+        registerPilotWorkspace();
+        when(questions.handle(anyLong(), any())).thenReturn(CompletableFuture.completedFuture(null));
+
+        mvc.perform(eventRequest("T_PILOT", "EvLost").header("X-Slack-Retry-Num", "1")).andExpect(status().isOk());
+        // The same retry again is a duplicate now and is not run twice.
+        mvc.perform(eventRequest("T_PILOT", "EvLost").header("X-Slack-Retry-Num", "2")).andExpect(status().isOk());
+
+        verify(questions, times(1)).handle(eq(tenantId), any());
     }
 
     @Test

@@ -82,8 +82,9 @@ public class SlackEventsController {
             String eventId = SlackHttpEvents.eventId(envelope);
             boolean first = eventId == null || seen.put(eventId, Boolean.TRUE) == null;
             if (holdOpen()) {
-                // A retry, or an event already accepted (finished or in flight): nothing to do and nothing to wait for.
-                if (request.getHeader(RETRY_HEADER) == null && first) {
+                // An event already accepted (finished or in flight) has nothing to do and nothing to wait for. A
+                // retry of an event this instance never saw is run: the first attempt must have been lost.
+                if (first) {
                     await(runNow(() -> events.eventCallback(envelope)));
                 }
             } else if (first || request.getHeader(RETRY_HEADER) == null) {
