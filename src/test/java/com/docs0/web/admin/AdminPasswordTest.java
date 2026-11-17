@@ -91,8 +91,20 @@ class AdminPasswordTest extends IntegrationTest {
     }
 
     @Test
-    void theStatusPageNeedsNoPassword() throws Exception {
-        mvc.perform(remote(get("/"))).andExpect(status().isOk());
-        mvc.perform(remote(get("/health"))).andExpect(status().isOk());
+    void theStatusPageNeedsThePasswordToo() throws Exception {
+        mvc.perform(remote(get("/"))).andExpect(status().isUnauthorized())
+                .andExpect(header().exists("WWW-Authenticate"));
+        mvc.perform(remote(get("/")).header("Authorization", basic("admin", "wrong")))
+                .andExpect(status().isUnauthorized());
+        String html = mvc.perform(remote(get("/")).header("Authorization", basic("admin", PASSWORD)))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        assertThat(html).contains("smallTech");
+    }
+
+    @Test
+    void healthIsPublicButSaysOnlyUp() throws Exception {
+        String body = mvc.perform(remote(get("/health"))).andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+        assertThat(body).isEqualTo("{\"status\":\"UP\"}");
     }
 }

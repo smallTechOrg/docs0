@@ -30,6 +30,9 @@ public class AdminWebConfig implements WebMvcConfigurer {
         if (props.multiTenant()) {
             // The two pages a signed-out admin has to reach in order to sign in.
             registration.excludePathPatterns("/admin/login", "/admin/login/callback");
+        } else if (props.adminPasswordSet()) {
+            // Hosted pilot: the status page lists tenant, counts and integrations, so it needs the same password.
+            registry.addInterceptor(guard).addPathPatterns("/");
         }
     }
 

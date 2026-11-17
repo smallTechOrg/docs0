@@ -293,7 +293,8 @@ that Slack did not accept the message.
 
 Open <http://localhost:8080> for the status page: connection state for the Database, Slack, Anthropic,
 Google Drive, Gmail, Linear, Trello, Grain and Slack history, the document count, the last sync and this month's spend, with a link to the
-Sources page. `/health` returns the same as JSON. Without `DOCS0_ADMIN_PASSWORD` the admin pages are served
+Sources page. `/health` returns the same as JSON; when `DOCS0_ADMIN_PASSWORD` is set the status page asks for
+that password (user `admin`) and `/health` returns only `{"status":"UP"}`. Without `DOCS0_ADMIN_PASSWORD` the admin pages are served
 only to requests from this machine **for a `localhost`, `127.0.0.1` or `[::1]` host name** (any other `Host`
 gets 403); set `DOCS0_ADMIN_PASSWORD` if you reach docs0 by another name or through a proxy. The app starts even when a credential is missing; the status page says
 what is not set up.
@@ -411,6 +412,130 @@ it says so, asks a clarifying question, or names who might know.
   up. The digest never contains direct-message questions, who asked, private-source content or
   questions from private channels. The AI calls behind repeat-question checks and themes are billed to the
   monthly cap too; the **Costs** page shows them on their own line.
+
+## Deploying to Cloud Run
+
+docs0 can run on Google Cloud Run in the project `ai-agent-boilerplate0` (region `us-central1`), sharing the existing
+Cloud SQL Postgres instance `ai-agent-db` with the other apps. Everything is driven by `deploy/deploy.sh` (a dry run
+unless you pass `--apply`) and the GitHub Actions workflow `.github/workflows/deploy.yml`.
+
+> **Status of the pieces.** Implemented and tested in this repository: the `Dockerfile`, `PORT` handling, the small
+> database pool, database auto-creation (`DOCS0_AUTO_CREATE_DATABASE`), the password-protected status page and
+> `/health` that says only `UP`, graceful shutdown, `deploy/deploy.sh` and the workflow. **Implemented by the follow-up
+> code change** (the deploy script already passes these settings): the HTTP transport for the single-company pilot
+> (`DOCS0_SLACK_TRANSPORT=http`), holding the request open while an answer is produced, the job entrypoint
+> (`--docs0.job=sync` / `--docs0.job=digest`), `DOCS0_INTERNAL_SCHEDULER=false` and the "Sync now" button that starts
+> the sync job (`DOCS0_SYNC_JOB_NAME`, `DOCS0_GCP_PROJECT`, `DOCS0_GCP_REGION`). Until that lands, the deployed service
+> starts and serves the admin pages, but Slack over HTTP and the scheduled jobs do not work yet.
+
+### How it runs
+
+- **Scale to zero.** One Cloud Run service `docs0` (`--min-instances 0 --max-instances 1`, 1 vCPU, 1 GiB, request-based
+  CPU). When nobody uses it there is no instance and nothing to pay for. The first request after idle starts a container:
+  a Slack message right after a quiet spell can take about 10 seconds to be answered, and Slack may show one delivery
+  retry (docs0 ignores the duplicate).
+- **Slack over HTTP, not Socket Mode.** A scaled-to-zero service cannot hold a websocket, so Slack sends events to
+  `$PUBLIC_URL/slack/events` and button clicks to `$PUBLIC_URL/slack/interactions`.
+- **Background work is a Cloud Run Job, not a thread.** Document syncs and the weekly digest run as the Cloud Run Jobs
+  `docs0-sync` and `docs0-digest` (the same image, started with `--docs0.job=sync` / `--docs0.job=digest`), triggered by
+  Cloud Scheduler: `docs0-sync` every 15 minutes (`*/15 * * * *`), `docs0-digest` on Monday 09:00 (`0 9 * * 1`, in
+  `DOCS0_TIMEZONE`, default UTC). Scheduler calls the Cloud Run Jobs `run` API with an OAuth token of the runtime
+  service account. The in-app scheduler is off in the service (`DOCS0_INTERNAL_SCHEDULER=false`). The Sources page
+  "Sync now" button starts `docs0-sync` through the same API.
+- **Shared database.** The instance `ai-agent-db` (Postgres 17, private IP `10.110.112.7`, SSL required) holds about ten
+  apps and allows 90 connections in all, so docs0 keeps a pool of at most 5 (`DOCS0_DB_POOL_MAX`). docs0 gets its own
+  role `docs0_app` (created with `gcloud sql users create`, so it may `CREATE DATABASE`) and its own database `docs0`,
+  which the app creates itself on first boot (`DOCS0_AUTO_CREATE_DATABASE=true`: it connects to the `postgres`
+  database as that role, takes an advisory lock and runs `CREATE DATABASE "docs0"` if it is missing, so the role owns
+  it). Cloud Run reaches the private IP through Direct VPC egress (`--network default --subnet default --vpc-egress
+  private-ranges-only`). The URL is `jdbc:postgresql://10.110.112.7:5432/docs0?sslmode=require`.
+- **Admin access.** In hosted mode `DOCS0_ADMIN_PASSWORD` is required. `/admin/**` and the status page `/` need HTTP
+  Basic (user `admin`); `/health` is public and returns only `{"status":"UP"}`. Loopback admin access does not apply on
+  Cloud Run.
+- **Configuration is plain environment variables.** There is no Secret Manager. Settings and secrets live in the GitHub
+  environment `production` and are written as environment variables on the Cloud Run service and jobs. Anyone who can
+  view the service or job configuration in the Cloud console can read them, so keep project access small.
+- **Cost.** A few US dollars a month at current list prices (mostly Cloud Scheduler and the job runtime every 15
+  minutes; the service itself is free while idle). Check the Cloud Run pricing page.
+- **No data migrates from your laptop.** The hosted database `docs0` starts empty; documents re-sync from Drive after
+  you connect Google Drive again on the hosted Sources page.
+
+### One-time setup
+
+1. **GitHub environment.** Repository Settings -> Environments -> New environment `production`. Add the secrets and
+   variables below yourself in the GitHub page (Add environment secret / Add environment variable). Never paste a secret
+   into a chat or an issue.
+
+   | Name | Kind | Purpose |
+   |---|---|---|
+   | `DOCS0_ANTHROPIC_API_KEY` | secret | Anthropic API key |
+   | `DOCS0_SLACK_BOT_TOKEN` | secret | Slack bot token (`xoxb-...`) |
+   | `DOCS0_SLACK_SIGNING_SECRET` | secret | Slack Basic Information -> Signing Secret; verifies events |
+   | `DOCS0_ENCRYPTION_KEY` | secret | base64 of 32 random bytes (`openssl rand -base64 32`); encrypts stored Google grants. Back it up |
+   | `DOCS0_ADMIN_PASSWORD` | secret | password for `/admin` and `/` (user `admin`) |
+   | `DOCS0_DATABASE_PASSWORD` | secret | password of role `docs0_app`; generate once: `openssl rand -base64 24 \| tr -d '/+=\n'` |
+   | `DOCS0_GOOGLE_OAUTH_CLIENT_ID`, `DOCS0_GOOGLE_OAUTH_CLIENT_SECRET` | secret | Google OAuth web client for Drive sign-in |
+   | `DOCS0_CRON_TOKEN` | secret, optional | reserved; jobs replace internal endpoints so nothing needs it yet |
+   | `DOCS0_PUBLIC_URL` | variable, optional | default `https://docs0.smalltech.in` |
+   | `DOCS0_TENANT_SLUG`, `DOCS0_TENANT_NAME` | variable, optional | default `smalltech`, `smallTech` |
+   | `DOCS0_MONTHLY_BUDGET_USD`, `DOCS0_ANTHROPIC_MODEL` | variable, optional | default `100`, `claude-sonnet-5-5` |
+   | `DOCS0_SLACK_HISTORY_DAYS`, `DOCS0_GRAIN_HISTORY_DAYS`, `DOCS0_GMAIL_HISTORY_DAYS`, `DOCS0_PROACTIVE_MAX_PER_HOUR`, `DOCS0_STALE_DAYS`, `DOCS0_AGENT_MAX_STEPS`, `DOCS0_NEW_TENANT_BUDGET_USD`, `DOCS0_TIMEZONE`, `DOCS0_DB_POOL_MAX` | variable, optional | same meaning as in [.env.example](.env.example); unset = app default |
+
+   `DOCS0_SLACK_APP_TOKEN` is not needed in HTTP mode.
+2. **Trust GitHub (once, by someone who can administer IAM):** `deploy/deploy.sh --step wif` to review, then
+   `deploy/deploy.sh --apply --step wif`. It creates the Workload Identity provider `docs0-github` (pool `github`),
+   restricted to `smallTechOrg/docs0`, and lets the existing deployer service account be impersonated from it.
+3. **Create the role (once):** with `DOCS0_DATABASE_PASSWORD` exported in your shell,
+   `deploy/deploy.sh --apply --step db-user`. Re-running sets the same password again.
+4. **First deploy, by hand or from the workflow.** Stop the laptop docs0 first (see below). Review the plan with a dry
+   run, then apply: Actions -> Deploy -> Run workflow (tick *Dry run* first; the default steps are `deploy jobs`), or
+   locally with the variables exported: `deploy/deploy.sh`, then `deploy/deploy.sh --apply`. The first boot creates
+   the database and runs the migrations (allow up to 3 minutes; the startup probe waits for `/health`).
+5. **Scheduler (once, and when a schedule changes):** `deploy/deploy.sh --apply --step scheduler` (enables
+   `run.googleapis.com` and `cloudscheduler.googleapis.com`, creates/updates `docs0-sync` and `docs0-digest`).
+   Run the workflow with `steps` = `deploy jobs scheduler` if the deployer account may do this.
+6. **Domain (once):** `deploy/deploy.sh --apply --step domain` creates the Cloud Run domain mapping for
+   `docs0.smalltech.in` and the step prints the DNS record to add: `CNAME docs0 -> ghs.googlehosted.com.` Until DNS
+   and the certificate are ready, use `https://docs0-870371939888.us-central1.run.app`.
+
+### Slack app changes (the owner makes these in api.slack.com)
+
+Use the same Slack app as before and change it once the service is live:
+
+1. **Socket Mode:** switch it **off** (Settings -> Socket Mode).
+2. **Event Subscriptions:** switch on, Request URL `https://docs0.smalltech.in/slack/events` (it must show *Verified*;
+   the service must be deployed with `DOCS0_SLACK_SIGNING_SECRET` set), keep the existing bot events.
+3. **Interactivity & Shortcuts:** on, Request URL `https://docs0.smalltech.in/slack/interactions`.
+4. **Basic Information -> App Credentials -> Signing Secret:** copy it into the GitHub secret
+   `DOCS0_SLACK_SIGNING_SECRET`, then deploy again.
+5. **Reinstall the app** to the workspace (Install App -> Reinstall) so the changed settings apply.
+
+**Stop the laptop first.** Once the app uses HTTP events, a docs0 on your laptop in Socket Mode no longer receives
+anything; do not run it against the same Slack app. Two docs0 instances against one workspace would split events.
+
+### Google Drive redirect URI
+
+On the Google OAuth client add the authorised redirect URI `$DOCS0_PUBLIC_URL/admin/sources/google/callback`
+(`https://docs0.smalltech.in/admin/sources/google/callback`; add the `run.app` URL too if you use it before DNS), then
+open `/admin/sources` on the hosted URL and connect Google Drive.
+
+### Checking, rollback
+
+- `deploy/deploy.sh --step verify` (read-only): service URL, `curl /health` (expect `{"status":"UP"}`; the first call
+  after idle takes a few seconds), the Scheduler jobs.
+- Log in at `/admin` as user `admin` with the value of the GitHub secret `DOCS0_ADMIN_PASSWORD`.
+- Rollback: `deploy/deploy.sh rollback` lists revisions; `deploy/deploy.sh --apply rollback <REVISION>` sends all traffic
+  to one. The database is not rolled back (migrations only move forward), and the jobs keep the image they were last
+  deployed with until `deploy/deploy.sh --apply --step jobs`.
+- Local build: the image needs no `.env`; `.dockerignore` and `.gcloudignore` keep `.env`, `.git`, `.claude` and
+  `target` out of the upload.
+
+### Variables the hosted setup uses
+
+`PORT` (set by Cloud Run; overrides `DOCS0_PORT`), `DOCS0_DATABASE_URL` (use `?sslmode=require`),
+`DOCS0_DATABASE_USER`, `DOCS0_DATABASE_PASSWORD`, `DOCS0_AUTO_CREATE_DATABASE` (default `false`), `DOCS0_DB_POOL_MAX`
+(default 5), `DOCS0_ADMIN_PASSWORD`. Follow-up: `DOCS0_SLACK_TRANSPORT`, `DOCS0_INTERNAL_SCHEDULER`,
+`DOCS0_SYNC_JOB_NAME`, `DOCS0_GCP_PROJECT`, `DOCS0_GCP_REGION`.
 
 ## Test
 

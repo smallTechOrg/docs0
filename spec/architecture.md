@@ -256,3 +256,13 @@ installation, then greets the installer.
 **Sessions.** The admin session holds an `AdminPrincipal`; `AdminGuard` is unchanged (CSRF token per session on
 every non-read request). `/admin/login` and `/admin/login/callback` are excluded from the guard only in this mode.
 `MultiTenantConfig` sets the session cookie flags and warns at startup when the public URL is not https.
+
+## Hosting
+
+docs0 is deployed to Cloud Run (project `ai-agent-boilerplate0`, `us-central1`) as a scale-to-zero service (max one
+instance) on the shared Cloud SQL Postgres instance, with its own role and database. The database is created by the
+app at first boot (`DOCS0_AUTO_CREATE_DATABASE`, `config/DatabaseBootstrap`, run from an `EnvironmentPostProcessor`
+before the DataSource exists). Slack reaches it over HTTP events; syncs and the weekly digest run as Cloud Run Jobs
+triggered by Cloud Scheduler; configuration is plain environment variables from a GitHub environment. With
+`DOCS0_ADMIN_PASSWORD` set, `/admin/**` and `/` need the password and `/health` returns only `UP`. See the README
+section "Deploying to Cloud Run" and `deploy/deploy.sh`.

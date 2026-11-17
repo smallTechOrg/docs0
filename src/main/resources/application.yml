@@ -8,16 +8,32 @@ spring:
     url: ${DOCS0_DATABASE_URL:jdbc:postgresql://localhost:5432/docs0}
     username: ${DOCS0_DATABASE_USER:${user.name}}
     password: ${DOCS0_DATABASE_PASSWORD:}
+    hikari:
+      # The Cloud SQL instance is shared by about ten apps and allows 90 connections in all, so each app keeps a
+      # small pool (default 5, raise with DOCS0_DB_POOL_MAX) and hands idle connections back.
+      maximum-pool-size: ${DOCS0_DB_POOL_MAX:5}
+      minimum-idle: 1
+      connection-timeout: 10000
+      idle-timeout: 300000
+      max-lifetime: 1500000
   flyway:
     enabled: true
   threads:
     virtual:
       enabled: true
+  lifecycle:
+    timeout-per-shutdown-phase: 25s
 
 server:
-  port: ${DOCS0_PORT:8080}
+  # Cloud Run injects PORT.
+  port: ${PORT:${DOCS0_PORT:8080}}
+  # Let in-flight requests finish on shutdown; the Slack Socket Mode connection closes in a @PreDestroy.
+  shutdown: graceful
 
 docs0:
+  database:
+    # true: on start, create the database named in DOCS0_DATABASE_URL if it is missing (the role needs CREATEDB).
+    auto-create: ${DOCS0_AUTO_CREATE_DATABASE:false}
   tenant:
     slug: ${DOCS0_TENANT_SLUG:smalltech}
     name: ${DOCS0_TENANT_NAME:smallTech}
@@ -73,5 +89,6 @@ docs0:
   encryption-key: ${DOCS0_ENCRYPTION_KEY:}
   # Where a browser reaches this app. The Google redirect URI is <public-url>/admin/sources/google/callback.
   public-url: ${DOCS0_PUBLIC_URL:http://localhost:${server.port}}
-  # Password for /admin pages (user "admin"). Empty: /admin is served to the local machine only.
+  # Password for /admin pages (user "admin"). Empty: /admin is served to the local machine only. Set: the status
+  # page "/" needs it too and /health shows only UP (hosted mode).
   admin-password: ${DOCS0_ADMIN_PASSWORD:}

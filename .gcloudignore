@@ -1,0 +1,25 @@
+# Files `gcloud run deploy --source .` must not upload to Cloud Build (the Dockerfile itself must be uploaded).
+.env
+.env.*
+!.env.example
+.git
+.gitignore
+.gitattributes
+.claude
+.idea
+.vscode
+.settings
+.project
+.classpath
+*.iml
+target
+secrets
+NOTES.md
+spec
+docs
+deploy
+slack
+README.md
+src/test
+*.log
+.DS_Store

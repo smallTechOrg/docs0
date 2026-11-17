@@ -1,0 +1,25 @@
+# Keep the build context small and secret-free. The build needs only pom.xml, mvnw, .mvn and src/main.
+.env
+.env.*
+!.env.example
+.git
+.gitignore
+.gitattributes
+.claude
+.idea
+.vscode
+.settings
+.project
+.classpath
+*.iml
+target
+secrets
+NOTES.md
+spec
+docs
+deploy
+slack
+README.md
+src/test
+*.log
+.DS_Store

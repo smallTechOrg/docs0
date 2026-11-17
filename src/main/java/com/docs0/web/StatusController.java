@@ -36,11 +36,14 @@ public class StatusController {
         return "status";
     }
 
-    /** UP whenever the app and database respond; integrations report their own state underneath. */
+    /**
+     * UP whenever the app and database respond; integrations report their own state underneath. With
+     * DOCS0_ADMIN_PASSWORD set (hosted) the endpoint is open to the world, so it says only UP.
+     */
     @GetMapping("/health")
     @ResponseBody
     public Map<String, Object> health() {
-        if (props.multiTenant()) {
+        if (props.multiTenant() || props.adminPasswordSet()) {
             return Map.of("status", "UP");
         }
         var snap = status.snapshot(local.tenant().id());
