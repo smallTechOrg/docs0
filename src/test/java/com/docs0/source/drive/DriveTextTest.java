@@ -75,4 +75,67 @@ class DriveTextTest {
             return out.toByteArray();
         }
     }
+
+    @Test
+    void extractsParagraphsTablesAndHeadersFromADocx() throws IOException {
+        String body = "<w:document xmlns:w='w'><w:body>"
+                + "<w:p><w:r><w:t>Outreach Strategy</w:t></w:r></w:p>"
+                + "<w:p><w:r><w:t xml:space='preserve'>Warm </w:t></w:r><w:r><w:t>accounts first</w:t></w:r></w:p>"
+                + "<w:tbl><w:tr><w:tc><w:p><w:r><w:t>Tier 1</w:t></w:r></w:p></w:tc></w:tr></w:tbl>"
+                + "</w:body></w:document>";
+        byte[] docx = zip("word/document.xml", body, "word/header1.xml",
+                "<w:hdr xmlns:w='w'><w:p><w:r><w:t>Confidential header</w:t></w:r></w:p></w:hdr>");
+
+        String text = DriveText.extract(OfficeText.DOCX, docx);
+
+        assertThat(text).contains("Outreach Strategy").contains("Warm accounts first").contains("Tier 1")
+                .contains("Confidential header");
+        assertThat(DriveText.indexable(OfficeText.DOCX, 17810L)).isTrue();
+    }
+
+    @Test
+    void extractsSheetsWithSharedStringsAndSheetNamesFromAnXlsx() throws IOException {
+        byte[] xlsx = zip(
+                "xl/workbook.xml", "<workbook><sheets><sheet name='Outreach' sheetId='1'/></sheets></workbook>",
+                "xl/sharedStrings.xml", "<sst><si><t>Company</t></si><si><t>Sharp HRD</t></si></sst>",
+                "xl/worksheets/sheet1.xml", "<worksheet><sheetData>"
+                        + "<row><c t='s'><v>0</v></c><c><v>Count</v></c></row>"
+                        + "<row><c t='s'><v>1</v></c><c><v>42</v></c></row></sheetData></worksheet>");
+
+        String text = DriveText.extract(OfficeText.XLSX, xlsx);
+
+        assertThat(text).contains("## Outreach").contains("Company").contains("Sharp HRD\t42");
+    }
+
+    @Test
+    void extractsSlidesInNumericOrderThenNotesFromAPptx() throws IOException {
+        byte[] pptx = zip(
+                "ppt/slides/slide10.xml", "<p:sld xmlns:p='p' xmlns:a='a'><a:p><a:r><a:t>Tenth</a:t></a:r></a:p></p:sld>",
+                "ppt/slides/slide2.xml", "<p:sld xmlns:p='p' xmlns:a='a'><a:p><a:r><a:t>Second</a:t></a:r></a:p></p:sld>",
+                "ppt/notesSlides/notesSlide2.xml", "<p:notes xmlns:p='p' xmlns:a='a'><a:p><a:r><a:t>Speaker note</a:t></a:r></a:p></p:notes>");
+
+        String text = DriveText.extract(OfficeText.PPTX, pptx);
+
+        assertThat(text.indexOf("Second")).isLessThan(text.indexOf("Tenth"));
+        assertThat(text.indexOf("Tenth")).isLessThan(text.indexOf("Speaker note"));
+    }
+
+    @Test
+    void aCorruptOfficeFileThrowsInsteadOfReturningGarbage() {
+        assertThatThrownBy(() -> DriveText.extract(OfficeText.DOCX,
+                zip("word/document.xml", "<w:document><oops").clone()))
+                .isInstanceOf(IOException.class);
+    }
+
+    private static byte[] zip(String... namesAndContents) throws IOException {
+        ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+        try (java.util.zip.ZipOutputStream zip = new java.util.zip.ZipOutputStream(bytes)) {
+            for (int i = 0; i < namesAndContents.length; i += 2) {
+                zip.putNextEntry(new java.util.zip.ZipEntry(namesAndContents[i]));
+                zip.write(namesAndContents[i + 1].getBytes(StandardCharsets.UTF_8));
+                zip.closeEntry();
+            }
+        }
+        return bytes.toByteArray();
+    }
 }

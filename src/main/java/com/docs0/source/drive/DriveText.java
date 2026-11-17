@@ -36,7 +36,7 @@ public final class DriveText {
 
     public static boolean supported(String mimeType) {
         return mimeType != null && (EXPORTS.containsKey(mimeType) || PDF.equals(mimeType)
-                || PLAIN_TEXT.contains(mimeType));
+                || PLAIN_TEXT.contains(mimeType) || OfficeText.supported(mimeType));
     }
 
     /** True for a file docs0 indexes: a supported type that is not over the size limit. */
@@ -58,6 +58,9 @@ public final class DriveText {
             try (PDDocument pdf = Loader.loadPDF(content)) {
                 return new PDFTextStripper().getText(pdf);
             }
+        }
+        if (OfficeText.supported(mimeType)) {
+            return OfficeText.extract(mimeType, content);
         }
         String text = new String(content, StandardCharsets.UTF_8);
         // Drive's text exports start with a byte order mark.
